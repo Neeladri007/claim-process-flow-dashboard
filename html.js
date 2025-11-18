@@ -110,7 +110,7 @@ async function expandNode(nodeData) {
         if (data.terminations && data.terminations.count > 0) {
             const termPath = [...fullPath, 'END'];
             const termId = 'node_' + termPath.join('->');
-            
+
             nodeData.children.push({
                 id: termId,
                 name: '🏁 Terminated',
@@ -128,7 +128,7 @@ async function expandNode(nodeData) {
                 // Create unique ID based on full path to prevent convergence
                 const childPath = [...fullPath, step.process];
                 const childId = 'node_' + childPath.join('->');
-                
+
                 nodeData.children.push({
                     id: childId,  // Unique identifier based on full path
                     name: step.process,
