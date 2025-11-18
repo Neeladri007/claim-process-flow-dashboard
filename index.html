@@ -338,6 +338,7 @@
                     name: sp.process,
                     count: sp.count,
                     percentage: sp.percentage,
+                    avgDuration: sp.avg_duration_minutes,
                     path: [],
                     children: [],
                     hasChildren: true,
@@ -457,6 +458,7 @@
                         name: '🏁 Terminated',
                         count: data.terminations.count,
                         percentage: data.terminations.percentage,
+                        avgDuration: 0,
                         isTermination: true,
                         path: fullPath
                     });
@@ -468,6 +470,7 @@
                         name: step.process,
                         count: step.count,  // This is the actual flow count from this parent
                         percentage: step.percentage,
+                        avgDuration: step.avg_duration_minutes,
                         path: fullPath,
                         children: [],
                         hasChildren: true,
@@ -690,7 +693,7 @@
             // Add count
             nodes.append('text')
                 .attr('class', 'count-text')
-                .attr('dy', -2)
+                .attr('dy', -6)
                 .attr('text-anchor', 'middle')
                 .style('font-weight', 'bold')
                 .style('font-size', d => Math.max(10, d.radius / 2.5) + 'px')
@@ -699,10 +702,25 @@
             // Add percentage
             nodes.append('text')
                 .attr('class', 'percentage-text')
-                .attr('dy', 9)
+                .attr('dy', 5)
                 .attr('text-anchor', 'middle')
-                .style('font-size', d => Math.max(9, d.radius / 3.2) + 'px')
+                .style('font-size', d => Math.max(8, d.radius / 3.5) + 'px')
                 .text(d => d.data.percentage ? `${d.data.percentage}%` : '');
+
+            // Add duration (below percentage)
+            nodes.append('text')
+                .attr('class', 'duration-text')
+                .attr('dy', 15)
+                .attr('text-anchor', 'middle')
+                .style('font-size', d => Math.max(7, d.radius / 4) + 'px')
+                .style('fill', '#999')
+                .style('font-style', 'italic')
+                .text(d => {
+                    if (d.data.avgDuration !== undefined && d.data.avgDuration > 0 && !d.data.isTermination) {
+                        return `${d.data.avgDuration}m`;
+                    }
+                    return '';
+                });
 
             // Update positions on each tick
             simulation.on('tick', () => {
@@ -746,6 +764,9 @@
             html += `<div>Claims: ${d.data.count}</div>`;
             if (d.data.percentage) {
                 html += `<div>Percentage: ${d.data.percentage}%</div>`;
+            }
+            if (d.data.avgDuration !== undefined && d.data.avgDuration > 0) {
+                html += `<div>Avg Duration: ${d.data.avgDuration} min</div>`;
             }
             if (d.data.totalFlows) {
                 html += `<div>Total Flows: ${d.data.totalFlows}</div>`;

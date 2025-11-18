@@ -42,16 +42,25 @@ async def root():
 
 @app.get("/api/starting-processes")
 async def get_starting_processes():
-    """Get all starting processes with their claim counts"""
+    """Get all starting processes with their claim counts and average duration"""
     if df is None:
         raise HTTPException(status_code=500, detail="Data not loaded")
     
-    # Get the first process for each claim
-    starting_processes = df.sort_values(['Claim_Number', 'First_TimeStamp']).groupby('Claim_Number').first()['Process']
+    # Get the first process for each claim with activity data
+    first_activities = df.sort_values(['Claim_Number', 'First_TimeStamp']).groupby('Claim_Number').first()
+    starting_processes = first_activities['Process']
     
-    # Count occurrences
+    # Count occurrences and calculate average duration
     process_counts = starting_processes.value_counts().to_dict()
     total_claims = len(starting_processes)
+    
+    # Calculate average duration for each starting process
+    process_durations = {}
+    for process in process_counts.keys():
+        # Get all first activities for this process
+        mask = first_activities['Process'] == process
+        avg_duration = first_activities[mask]['Active_Minutes'].mean()
+        process_durations[process] = avg_duration
     
     # Format response
     result = []
@@ -59,7 +68,8 @@ async def get_starting_processes():
         result.append({
             "process": process,
             "count": int(count),
-            "percentage": round((count / total_claims) * 100, 2)
+            "percentage": round((count / total_claims) * 100, 2),
+            "avg_duration_minutes": round(process_durations[process], 2)
         })
     
     # Sort by count descending
@@ -80,11 +90,13 @@ async def get_process_flow(process_name: str, filter_type: Optional[str] = None)
     if df is None:
         raise HTTPException(status_code=500, detail="Data not loaded")
     
-    # Get claim sequences
-    claim_sequences = df.sort_values(['Claim_Number', 'First_TimeStamp']).groupby('Claim_Number')['Process'].apply(list).to_dict()
+    # Get claim sequences with activity data
+    claim_data = df.sort_values(['Claim_Number', 'First_TimeStamp'])
+    claim_sequences = claim_data.groupby('Claim_Number')['Process'].apply(list).to_dict()
     
     # Filter claims based on filter_type and collect FIRST occurrence transitions
     transitions = []
+    transition_durations = {}  # Store durations for each transition
     terminations = 0
     relevant_claims_count = 0
     
@@ -95,7 +107,17 @@ async def get_process_flow(process_name: str, filter_type: Optional[str] = None)
                 relevant_claims_count += 1
                 # Get ONLY the immediate next step after the FIRST occurrence
                 if len(processes) > 1:
-                    transitions.append(processes[1])
+                    next_process = processes[1]
+                    transitions.append(next_process)
+                    
+                    # Get duration for this next process
+                    claim_activities = claim_data[claim_data['Claim_Number'] == claim_num]
+                    # Find the second activity (index 1) which is the next process
+                    if len(claim_activities) > 1:
+                        duration = claim_activities.iloc[1]['Active_Minutes']
+                        if next_process not in transition_durations:
+                            transition_durations[next_process] = []
+                        transition_durations[next_process].append(duration)
                 else:
                     terminations += 1
         else:
@@ -105,7 +127,17 @@ async def get_process_flow(process_name: str, filter_type: Optional[str] = None)
                 # Find FIRST occurrence and get immediate next step
                 first_index = processes.index(process_name)
                 if first_index < len(processes) - 1:
-                    transitions.append(processes[first_index + 1])
+                    next_process = processes[first_index + 1]
+                    transitions.append(next_process)
+                    
+                    # Get duration for this next process
+                    claim_activities = claim_data[claim_data['Claim_Number'] == claim_num]
+                    # Find the activity at first_index + 1
+                    if len(claim_activities) > first_index + 1:
+                        duration = claim_activities.iloc[first_index + 1]['Active_Minutes']
+                        if next_process not in transition_durations:
+                            transition_durations[next_process] = []
+                        transition_durations[next_process].append(duration)
                 else:
                     terminations += 1
     
@@ -124,13 +156,18 @@ async def get_process_flow(process_name: str, filter_type: Optional[str] = None)
     
     total_flows = len(transitions) + terminations
     
-    # Format next steps
+    # Format next steps with average duration
     next_steps = []
     for next_process, count in transition_counts.items():
+        avg_duration = 0
+        if next_process in transition_durations and transition_durations[next_process]:
+            avg_duration = sum(transition_durations[next_process]) / len(transition_durations[next_process])
+        
         next_steps.append({
             "process": next_process,
             "count": count,
-            "percentage": round((count / total_flows) * 100, 2) if total_flows > 0 else 0
+            "percentage": round((count / total_flows) * 100, 2) if total_flows > 0 else 0,
+            "avg_duration_minutes": round(avg_duration, 2)
         })
     
     # Sort by count descending
@@ -172,11 +209,13 @@ async def get_process_flow_after_path(path: str):
     if not process_path:
         raise HTTPException(status_code=400, detail="Invalid path")
     
-    # Get claim sequences
-    claim_sequences = df.sort_values(['Claim_Number', 'First_TimeStamp']).groupby('Claim_Number')['Process'].apply(list).to_dict()
+    # Get claim sequences with activity data
+    claim_data = df.sort_values(['Claim_Number', 'First_TimeStamp'])
+    claim_sequences = claim_data.groupby('Claim_Number')['Process'].apply(list).to_dict()
     
     # Find claims that follow this exact path FROM THE START
     transitions = []
+    transition_durations = {}  # Store durations for each transition
     terminations = 0
     matching_claims = 0
     
@@ -190,7 +229,17 @@ async def get_process_flow_after_path(path: str):
                 matching_claims += 1
                 # Get the next step after this path
                 if len(processes) > path_len:
-                    transitions.append(processes[path_len])
+                    next_process = processes[path_len]
+                    transitions.append(next_process)
+                    
+                    # Get duration for this next process
+                    claim_activities = claim_data[claim_data['Claim_Number'] == claim_num]
+                    # Find the activity at path_len index
+                    if len(claim_activities) > path_len:
+                        duration = claim_activities.iloc[path_len]['Active_Minutes']
+                        if next_process not in transition_durations:
+                            transition_durations[next_process] = []
+                        transition_durations[next_process].append(duration)
                 else:
                     terminations += 1
     
@@ -212,10 +261,15 @@ async def get_process_flow_after_path(path: str):
     # Format next steps - THE COUNT HERE IS THE ACTUAL TRANSITION COUNT
     next_steps = []
     for next_process, count in transition_counts.items():
+        avg_duration = 0
+        if next_process in transition_durations and transition_durations[next_process]:
+            avg_duration = sum(transition_durations[next_process]) / len(transition_durations[next_process])
+        
         next_steps.append({
             "process": next_process,
             "count": count,  # This is how many claims transitioned here
-            "percentage": round((count / total_flows) * 100, 2) if total_flows > 0 else 0
+            "percentage": round((count / total_flows) * 100, 2) if total_flows > 0 else 0,
+            "avg_duration_minutes": round(avg_duration, 2)
         })
     
     # Sort by count descending
