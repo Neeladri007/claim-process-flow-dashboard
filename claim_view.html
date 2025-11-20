@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claim Path Search</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+            border-top: 5px solid #FFD000;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            color: #1A1446;
+            font-size: 1.5em;
+        }
+
+        .back-btn {
+            padding: 6px 12px;
+            background-color: #6c757d;
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+            font-size: 13px;
+            transition: background 0.3s;
+        }
+
+        .back-btn:hover {
+            background-color: #5a6268;
+        }
+
+        .search-box {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            justify-content: center;
+        }
+
+        input[type="number"] {
+            padding: 10px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            width: 300px;
+            transition: border-color 0.3s;
+        }
+
+        input[type="number"]:focus {
+            outline: none;
+            border-color: #1A1446;
+        }
+
+        button {
+            padding: 10px 20px;
+            background: linear-gradient(135deg, #1A1446 0%, #2a2266 100%);
+            color: #FFD000;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(26, 20, 70, 0.4);
+        }
+
+        .timeline {
+            position: relative;
+            padding: 10px 0;
+        }
+
+        .timeline::before {
+            content: '';
+            position: absolute;
+            left: 50px;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: #e0e0e0;
+            border-radius: 2px;
+        }
+
+        .timeline-item {
+            position: relative;
+            margin-bottom: 15px;
+            padding-left: 80px;
+            opacity: 0;
+            transform: translateY(20px);
+            animation: fadeIn 0.5s forwards;
+        }
+
+        @keyframes fadeIn {
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .timeline-marker {
+            position: absolute;
+            left: 42px;
+            top: 0;
+            width: 20px;
+            height: 20px;
+            background: white;
+            border: 4px solid #1A1446;
+            border-radius: 50%;
+            z-index: 1;
+        }
+
+        .timeline-content {
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 10px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            transition: transform 0.2s;
+        }
+
+        .timeline-content:hover {
+            transform: translateX(5px);
+            border-color: #1A1446;
+        }
+
+        .process-header-block {
+            margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .process-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+
+        .process-name {
+            font-weight: bold;
+            color: #1A1446;
+            font-size: 1.1em;
+        }
+
+        .process-total-duration {
+            font-size: 0.85em;
+            font-weight: 600;
+            color: #1A1446;
+            background: #FFD000;
+            padding: 2px 8px;
+            border-radius: 12px;
+        }
+
+        .process-duration-bar-container {
+            background: #f0f0f0;
+            border-radius: 4px;
+            height: 6px;
+            width: 100%;
+            overflow: hidden;
+        }
+
+        .process-duration-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #FFD000, #ffdb4d);
+            border-radius: 4px;
+            transition: width 1s ease-out;
+        }
+
+        .activity-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .activity-item {
+            background: #f8f9fa;
+            padding: 8px;
+            border-radius: 6px;
+            border-left: 3px solid #1A1446;
+        }
+
+        .activity-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 3px;
+        }
+
+        .activity-name {
+            color: #1A1446;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+
+        .activity-date {
+            font-size: 0.8em;
+            color: #666;
+        }
+
+        .activity-stats {
+            margin-bottom: 3px;
+        }
+
+        .duration-badge {
+            background: #f0f4ff;
+            color: #1A1446;
+            padding: 1px 6px;
+            border-radius: 10px;
+            font-size: 0.8em;
+            font-weight: 600;
+            border: 1px solid #e0e0e0;
+        }
+
+        .error-message {
+            color: #dc3545;
+            text-align: center;
+            padding: 15px;
+            background: #ffe6e6;
+            border-radius: 8px;
+            margin-top: 15px;
+            display: none;
+        }
+
+        .stats-summary {
+            display: flex;
+            justify-content: space-around;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            border-left: 5px solid #FFD000;
+        }
+
+        .summary-item {
+            text-align: center;
+        }
+
+        .summary-value {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #1A1446;
+        }
+
+        .summary-label {
+            font-size: 0.85em;
+            color: #666;
+        }
+
+        .duration-bar-container {
+            margin-top: 5px;
+            background: #f0f0f0;
+            border-radius: 4px;
+            height: 6px;
+            width: 100%;
+            overflow: hidden;
+        }
+
+        .duration-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #1A1446, #2a2266);
+            border-radius: 4px;
+            transition: width 1s ease-out;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 Claim Path Search</h1>
+            <div>
+                <a href="activity_view.html" class="back-btn" style="margin-right: 10px;">📋 Activity Flow</a>
+                <a href="index.html" class="back-btn">← Back to Tree</a>
+            </div>
+        </div>
+
+        <div class="search-box">
+            <input type="number" id="claimInput" list="claimList" placeholder="Enter Claim Number (e.g., 40043585)"
+                onkeypress="handleKeyPress(event)">
+            <datalist id="claimList"></datalist>
+            <button onclick="searchClaim()">Search</button>
+        </div>
+
+        <div id="errorMessage" class="error-message"></div>
+
+        <div id="resultsArea" style="display: none;">
+            <div class="stats-summary">
+                <div class="summary-item">
+                    <div class="summary-value" id="totalSteps">0</div>
+                    <div class="summary-label">Total Steps</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-value" id="totalDuration">0m</div>
+                    <div class="summary-label">Total Active Time</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-value" id="startDate">-</div>
+                    <div class="summary-label">Start Date</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-value" id="endDate">-</div>
+                    <div class="summary-label">End Date</div>
+                </div>
+            </div>
+
+            <div class="timeline" id="timeline">
+                <!-- Timeline items will be added here -->
+            </div>
+        </div>
+    </div>
+
+    <script src="claim_view.js"></script>
+</body>
+
+</html>

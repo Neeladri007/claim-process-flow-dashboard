@@ -19,16 +19,60 @@ app.add_middleware(
 
 # Global variable to store the dataframe
 df = None
+collapsed_df = None
+activity_collapsed_df = None
 
 def load_data():
     """Load the CSV data"""
-    global df
+    global df, collapsed_df, activity_collapsed_df
     csv_path = "simulated_claim_activities.csv"
     if not os.path.exists(csv_path):
         raise FileNotFoundError(f"CSV file not found: {csv_path}")
     df = pd.read_csv(csv_path)
     df['First_TimeStamp'] = pd.to_datetime(df['First_TimeStamp'])
+    
+    # Create collapsed dataframe for process flow analysis
+    # Sort by claim and timestamp
+    df_sorted = df.sort_values(['Claim_Number', 'First_TimeStamp'])
+    
+    # Identify where the process changes for the same claim
+    process_changed = (df_sorted['Process'] != df_sorted['Process'].shift(1))
+    claim_changed = (df_sorted['Claim_Number'] != df_sorted['Claim_Number'].shift(1))
+    
+    # A new group starts if the process changes OR the claim changes
+    group_key = (process_changed | claim_changed).cumsum()
+    
+    # Group by this key and aggregate
+    collapsed_df = df_sorted.groupby(group_key).agg({
+        'Claim_Number': 'first',
+        'Process': 'first',
+        'First_TimeStamp': 'first',
+        'Active_Minutes': 'sum'
+    }).reset_index(drop=True)
+    
+    # Create activity collapsed dataframe
+    # Identify where the process OR activity changes
+    activity_changed = (df_sorted['Activity'] != df_sorted['Activity'].shift(1))
+    
+    # A new group starts if process changes OR activity changes OR claim changes
+    activity_group_key = (process_changed | activity_changed | claim_changed).cumsum()
+    
+    activity_collapsed_df = df_sorted.groupby(activity_group_key).agg({
+        'Claim_Number': 'first',
+        'Process': 'first',
+        'Activity': 'first',
+        'First_TimeStamp': 'first',
+        'Active_Minutes': 'sum'
+    }).reset_index(drop=True)
+    
+    # Create a combined "Node Name" for the tree
+    # Handle potential missing activities
+    activity_collapsed_df['Activity'] = activity_collapsed_df['Activity'].fillna('Unknown')
+    activity_collapsed_df['Node_Name'] = activity_collapsed_df['Process'] + " | " + activity_collapsed_df['Activity']
+    
     print(f"Loaded {len(df)} records from CSV")
+    print(f"Collapsed into {len(collapsed_df)} process blocks")
+    print(f"Collapsed into {len(activity_collapsed_df)} activity blocks")
 
 @app.on_event("startup")
 async def startup_event():
@@ -40,14 +84,29 @@ async def root():
     """Serve the frontend HTML"""
     return FileResponse("index.html")
 
+@app.get("/claim-view")
+async def claim_view():
+    """Serve the claim view HTML"""
+    return FileResponse("claim_view.html")
+
+@app.get("/claim_view.html")
+async def claim_view_file():
+    """Serve the claim view HTML file directly"""
+    return FileResponse("claim_view.html")
+
+@app.get("/index.html")
+async def index_file():
+    """Serve the index HTML file directly"""
+    return FileResponse("index.html")
+
 @app.get("/api/starting-processes")
 async def get_starting_processes():
     """Get all starting processes with their claim counts and average duration"""
-    if df is None:
+    if collapsed_df is None:
         raise HTTPException(status_code=500, detail="Data not loaded")
     
     # Get the first process for each claim with activity data
-    first_activities = df.sort_values(['Claim_Number', 'First_TimeStamp']).groupby('Claim_Number').first()
+    first_activities = collapsed_df.sort_values(['Claim_Number', 'First_TimeStamp']).groupby('Claim_Number').first()
     starting_processes = first_activities['Process']
     
     # Count occurrences and calculate average duration
@@ -87,11 +146,11 @@ async def get_process_flow(process_name: str, filter_type: Optional[str] = None)
     filter_type: 'starting' - only claims that started with this process
                  None - all claims that went through this process
     """
-    if df is None:
+    if collapsed_df is None:
         raise HTTPException(status_code=500, detail="Data not loaded")
     
     # Get claim sequences with activity data
-    claim_data = df.sort_values(['Claim_Number', 'First_TimeStamp'])
+    claim_data = collapsed_df.sort_values(['Claim_Number', 'First_TimeStamp'])
     claim_sequences = claim_data.groupby('Claim_Number')['Process'].apply(list).to_dict()
     
     # Filter claims based on filter_type and collect FIRST occurrence transitions
@@ -201,7 +260,7 @@ async def get_process_flow_after_path(path: str):
     path: comma-separated list of processes (e.g., "Total Loss,Claim Admin,Settlement")
     Returns the next steps after this exact sequence STARTING FROM THE BEGINNING
     """
-    if df is None:
+    if collapsed_df is None:
         raise HTTPException(status_code=500, detail="Data not loaded")
     
     # Parse the path
@@ -210,7 +269,7 @@ async def get_process_flow_after_path(path: str):
         raise HTTPException(status_code=400, detail="Invalid path")
     
     # Get claim sequences with activity data
-    claim_data = df.sort_values(['Claim_Number', 'First_TimeStamp'])
+    claim_data = collapsed_df.sort_values(['Claim_Number', 'First_TimeStamp'])
     claim_sequences = claim_data.groupby('Claim_Number')['Process'].apply(list).to_dict()
     
     # Find claims that follow this exact path FROM THE START
@@ -301,6 +360,7 @@ async def get_claim_path(claim_number: int):
     for _, row in claim_data.iterrows():
         path.append({
             "process": row['Process'],
+            "activity": row['Activity'] if 'Activity' in row else None,
             "timestamp": row['First_TimeStamp'].isoformat(),
             "active_minutes": float(row['Active_Minutes'])
         })
@@ -311,6 +371,237 @@ async def get_claim_path(claim_number: int):
         "total_steps": len(path)
     }
 
+@app.get("/api/claim-numbers")
+async def get_claim_numbers():
+    """Get all unique claim numbers"""
+    if df is None:
+        raise HTTPException(status_code=500, detail="Data not loaded")
+    
+    claim_numbers = sorted(df['Claim_Number'].unique().tolist())
+    return {"claim_numbers": claim_numbers}
+
+@app.get("/api/activity-flow/starting-nodes")
+async def get_activity_starting_nodes():
+    """Get all starting activity nodes with their claim counts and average duration"""
+    if activity_collapsed_df is None:
+        raise HTTPException(status_code=500, detail="Data not loaded")
+    
+    # Get the first activity for each claim
+    first_activities = activity_collapsed_df.sort_values(['Claim_Number', 'First_TimeStamp']).groupby('Claim_Number').first()
+    starting_nodes = first_activities['Node_Name']
+    
+    # Count occurrences
+    node_counts = starting_nodes.value_counts().to_dict()
+    total_claims = len(starting_nodes)
+    
+    # Calculate average duration
+    node_durations = {}
+    for node in node_counts.keys():
+        mask = first_activities['Node_Name'] == node
+        avg_duration = first_activities[mask]['Active_Minutes'].mean()
+        node_durations[node] = avg_duration
+    
+    # Format response
+    result = []
+    for node, count in node_counts.items():
+        parts = node.split(' | ')
+        process = parts[0]
+        activity = parts[1] if len(parts) > 1 else ""
+        
+        result.append({
+            "node_name": node,
+            "process": process,
+            "activity": activity,
+            "count": int(count),
+            "percentage": round((count / total_claims) * 100, 2),
+            "avg_duration_minutes": round(node_durations[node], 2)
+        })
+    
+    # Sort by count descending
+    result.sort(key=lambda x: x['count'], reverse=True)
+    
+    return {
+        "total_claims": total_claims,
+        "starting_nodes": result
+    }
+
+@app.get("/api/activity-flow/next-steps")
+async def get_activity_next_steps(path: str):
+    """
+    Get the flow data after following a specific path of activities
+    path: sequence of "Process | Activity" separated by ";;"
+    """
+    if activity_collapsed_df is None:
+        raise HTTPException(status_code=500, detail="Data not loaded")
+    
+    # Parse the path
+    # Use ';;' as separator to avoid conflict with potential commas in names
+    node_path = [p.strip() for p in path.split(';;')]
+    if not node_path:
+        raise HTTPException(status_code=400, detail="Invalid path")
+    
+    # Get claim sequences
+    claim_data = activity_collapsed_df.sort_values(['Claim_Number', 'First_TimeStamp'])
+    claim_sequences = claim_data.groupby('Claim_Number')['Node_Name'].apply(list).to_dict()
+    
+    transitions = []
+    transition_durations = {}
+    terminations = 0
+    matching_claims = 0
+    
+    path_len = len(node_path)
+    
+    for claim_num, nodes in claim_sequences.items():
+        if len(nodes) >= path_len:
+            if nodes[:path_len] == node_path:
+                matching_claims += 1
+                if len(nodes) > path_len:
+                    next_node = nodes[path_len]
+                    transitions.append(next_node)
+                    
+                    # Get duration
+                    claim_activities = claim_data[claim_data['Claim_Number'] == claim_num]
+                    if len(claim_activities) > path_len:
+                        duration = claim_activities.iloc[path_len]['Active_Minutes']
+                        if next_node not in transition_durations:
+                            transition_durations[next_node] = []
+                        transition_durations[next_node].append(duration)
+                else:
+                    terminations += 1
+    
+    if matching_claims == 0:
+        return {
+            "path": node_path,
+            "total_claims": 0,
+            "total_flows": 0,
+            "next_steps": [],
+            "terminations": {"count": 0, "percentage": 0}
+        }
+    
+    from collections import Counter
+    transition_counts = Counter(transitions)
+    total_flows = len(transitions) + terminations
+    
+    next_steps = []
+    for next_node, count in transition_counts.items():
+        avg_duration = 0
+        if next_node in transition_durations and transition_durations[next_node]:
+            avg_duration = sum(transition_durations[next_node]) / len(transition_durations[next_node])
+        
+        parts = next_node.split(' | ')
+        process = parts[0]
+        activity = parts[1] if len(parts) > 1 else ""
+        
+        next_steps.append({
+            "node_name": next_node,
+            "process": process,
+            "activity": activity,
+            "count": count,
+            "percentage": round((count / total_flows) * 100, 2) if total_flows > 0 else 0,
+            "avg_duration_minutes": round(avg_duration, 2)
+        })
+    
+    next_steps.sort(key=lambda x: x['count'], reverse=True)
+    
+    return {
+        "path": node_path,
+        "total_claims": matching_claims,
+        "total_flows": total_flows,
+        "next_steps": next_steps,
+        "terminations": {
+            "count": terminations,
+            "percentage": round((terminations / total_flows) * 100, 2) if total_flows > 0 else 0
+        }
+    }
+
+@app.get("/api/activity-flow/sunburst")
+async def get_activity_sunburst(max_depth: int = 8, min_count: int = 2):
+    """
+    Get hierarchical data for Sunburst chart.
+    """
+    if activity_collapsed_df is None:
+        raise HTTPException(status_code=500, detail="Data not loaded")
+    
+    # Get all sequences
+    sequences = activity_collapsed_df.sort_values(['Claim_Number', 'First_TimeStamp']) \
+        .groupby('Claim_Number')['Node_Name'].apply(list)
+    
+    # Build Trie
+    root = {"name": "Start", "children": []}
+    
+    for seq in sequences:
+        current_node = root
+        # Limit depth
+        path = seq[:max_depth]
+        
+        for i, step_name in enumerate(path):
+            # Find or create child
+            found = None
+            if "children" not in current_node:
+                current_node["children"] = []
+                
+            for child in current_node["children"]:
+                if child["name"] == step_name:
+                    found = child
+                    break
+            
+            if not found:
+                # Extract process for coloring
+                parts = step_name.split(' | ')
+                process = parts[0]
+                
+                found = {
+                    "name": step_name, 
+                    "process": process,
+                    "children": []
+                }
+                current_node["children"].append(found)
+            
+            current_node = found
+            
+            # If this is the end of the sequence (or max depth), add value
+            if i == len(path) - 1:
+                if "value" not in current_node:
+                    current_node["value"] = 0
+                current_node["value"] += 1
+    
+    # Prune low frequency branches to keep visualization clean
+    def prune_and_clean(node):
+        if "children" in node and node["children"]:
+            # Filter children
+            # We need to calculate total value of children to know if we should prune?
+            # Actually, simpler to just prune based on leaf values? 
+            # No, we need to prune based on total flow through the node.
+            # But we haven't calculated total flow yet (D3 does that).
+            # Let's do a pre-pass to calculate total counts?
+            # Or just rely on the fact that we built it top-down.
+            pass
+            
+        # For now, let's just return the raw tree and let D3 handle it, 
+        # or do a simple prune if the node is a leaf and value is small.
+        pass
+
+    # Let's do a simple recursive count to prune small branches
+    def add_counts(node):
+        count = node.get("value", 0)
+        if "children" in node:
+            for child in node["children"]:
+                count += add_counts(child)
+        node["total_count"] = count
+        return count
+
+    add_counts(root)
+
+    def filter_nodes(node):
+        if "children" in node:
+            node["children"] = [c for c in node["children"] if c["total_count"] >= min_count]
+            for child in node["children"]:
+                filter_nodes(child)
+                
+    filter_nodes(root)
+    
+    return root
+    
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

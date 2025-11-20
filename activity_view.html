@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WEA Claim Process Flow</title>
+    <title>WEA Activity Flow</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <style>
         * {
@@ -46,39 +46,6 @@
             padding: 20px;
             background: #f8f9fa;
             border-radius: 10px;
-        }
-
-        .control-group {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        label {
-            font-weight: 600;
-            color: #1A1446;
-            font-size: 14px;
-        }
-
-        select {
-            padding: 10px 20px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            font-size: 14px;
-            background: white;
-            cursor: pointer;
-            min-width: 200px;
-            transition: all 0.3s;
-        }
-
-        select:hover {
-            border-color: #1A1446;
-        }
-
-        select:focus {
-            outline: none;
-            border-color: #1A1446;
-            box-shadow: 0 0 0 3px rgba(26, 20, 70, 0.1);
         }
 
         .stats-bar {
@@ -144,10 +111,27 @@
             stroke: #1A1446;
         }
 
+        .node.group circle {
+            fill: #fff;
+            stroke: #1A1446;
+            stroke-width: 3px;
+        }
+
+        .node.group:hover circle {
+            stroke: #FFD000;
+            stroke-width: 4px;
+        }
+
+        .node.group text {
+            font-weight: 800;
+            fill: #1A1446;
+        }
+
         .node.termination circle {
             fill: #f44336;
             stroke: #d32f2f;
             cursor: default;
+            stroke-dasharray: 0;
         }
 
         .node.root circle {
@@ -162,10 +146,6 @@
             filter: drop-shadow(0 0 12px rgba(26, 20, 70, 0.5));
             rx: 8px;
             ry: 8px;
-        }
-
-        .node.root:hover rect {
-            filter: drop-shadow(0 0 16px rgba(26, 20, 70, 0.7));
         }
 
         .node text {
@@ -189,11 +169,6 @@
             fill: none;
             stroke: #ccc;
             stroke-width: 2px;
-        }
-
-        .link.active {
-            stroke: #1A1446;
-            stroke-width: 3px;
         }
 
         .tooltip {
@@ -285,23 +260,15 @@
             background: #FFD000;
             border-color: #1A1446;
         }
-
-        .info-text {
-            text-align: center;
-            color: #666;
-            font-size: 14px;
-            margin-top: 15px;
-            font-style: italic;
-        }
     </style>
 </head>
 
 <body>
     <div class="container">
-        <h1> WEA Claim Process Flow</h1>
+        <h1>📋 WEA Activity Flow</h1>
 
         <div class="controls" style="justify-content: center; margin-bottom: 20px;">
-            <a href="activity_view.html" style="
+            <a href="index.html" style="
                 padding: 10px 20px;
                 background: #6c757d;
                 color: white;
@@ -312,9 +279,8 @@
                 align-items: center;
                 gap: 8px;
                 transition: background 0.3s;
-                margin-right: 10px;
             ">
-                📋 View Activity Flow
+                ← Back to Process Flow
             </a>
             <a href="claim_view.html" style="
                 padding: 10px 20px;
@@ -338,7 +304,7 @@
 
         <div id="loading" class="loading">
             <div class="spinner"></div>
-            <p>Loading process data...</p>
+            <p>Loading activity data...</p>
         </div>
 
         <div id="tree-container" style="display: none;">
@@ -348,11 +314,15 @@
         <div class="legend" id="legend" style="display: none;">
             <div class="legend-item">
                 <div class="legend-circle process"></div>
-                <span>Process Node</span>
+                <span>Activity Node</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-circle expandable"></div>
+                <span>Expanded / Has Children</span>
             </div>
             <div class="legend-item">
                 <div class="legend-circle termination"></div>
-                <span>Termination (End of Process)</span>
+                <span>Termination</span>
             </div>
         </div>
     </div>
@@ -360,7 +330,7 @@
     <div class="tooltip" id="tooltip" style="display: none;"></div>
 
     <!-- External JavaScript file -->
-    <script src="html.js"></script>
+    <script src="activity_tree.js"></script>
 </body>
 
 </html>
