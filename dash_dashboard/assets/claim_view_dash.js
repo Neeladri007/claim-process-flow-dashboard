@@ -21,9 +21,9 @@ window.ClaimView = (function () {
         // Check URL params
         const urlParams = new URLSearchParams(window.location.search);
         const claimFromUrl = urlParams.get('claim');
-        
+
         if (claimFromUrl) {
-             if (claimInput) {
+            if (claimInput) {
                 claimInput.value = claimFromUrl;
                 setTimeout(searchClaim, 500);
             }

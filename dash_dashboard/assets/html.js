@@ -198,12 +198,12 @@ window.ProcessFlow = (function () {
     function resetLayout() {
         const svg = d3.select('#tree-svg');
         const zoom = svg.node().__zoomBehavior;
-        
+
         // Reset zoom
         if (zoom) {
             svg.transition().duration(750).call(zoom.transform, d3.zoomIdentity);
         }
-        
+
         // Clear fixed positions recursively
         function clearFixed(node) {
             delete node.fx;
@@ -212,7 +212,7 @@ window.ProcessFlow = (function () {
                 node.children.forEach(clearFixed);
             }
         }
-        
+
         if (treeData) {
             clearFixed(treeData);
             // Redraw to restart simulation
@@ -236,13 +236,13 @@ window.ProcessFlow = (function () {
         let svg = containerSel.select('#tree-svg');
         if (svg.empty()) {
             svg = containerSel.append('svg').attr('id', 'tree-svg');
-            
+
             // Add grid background class
             svg.attr('class', 'grid-background');
-            
+
             // Add zoom group
             svg.append('g').attr('id', 'zoom-group');
-            
+
             // Init zoom
             const zoom = d3.zoom()
                 .scaleExtent([0.1, 4])
@@ -250,11 +250,11 @@ window.ProcessFlow = (function () {
                     svg.select('#zoom-group').attr('transform', event.transform);
                 });
             svg.call(zoom);
-            
+
             // Store zoom behavior on svg node for reset
             svg.node().__zoomBehavior = zoom;
         }
-        
+
         // Add Reset Button if not exists
         if (!document.getElementById('reset-chart-btn')) {
             const resetBtn = document.createElement('button');
@@ -274,7 +274,7 @@ window.ProcessFlow = (function () {
             container.style.position = 'relative';
             container.appendChild(resetBtn);
         }
-        
+
         // Add Controls Guide if not exists
         if (!document.getElementById('controls-guide')) {
             const guide = document.createElement('div');
@@ -408,7 +408,7 @@ window.ProcessFlow = (function () {
         function highlightPath(targetNode) {
             // Reset all links
             g.selectAll('.link').classed('highlighted', false);
-            
+
             let curr = targetNode;
             while (curr.parent) {
                 // Find link where target is curr
@@ -418,7 +418,7 @@ window.ProcessFlow = (function () {
                         return targetId === curr.id;
                     })
                     .classed('highlighted', true);
-                
+
                 // Move up to parent
                 curr = allNodes.find(n => n.id === curr.parent);
                 if (!curr) break;
@@ -447,12 +447,12 @@ window.ProcessFlow = (function () {
 
             function dragended(event, d) {
                 if (!event.active) simulation.alphaTarget(0);
-                
+
                 if (!d.hasMoved) {
                     d.fx = d.startFx;
                     d.fy = d.startFy;
                 }
-                
+
                 delete d.startFx;
                 delete d.startFy;
                 delete d.hasMoved;
@@ -492,10 +492,10 @@ window.ProcessFlow = (function () {
             .on('click', async function (event, d) {
                 if (event.defaultPrevented) return; // Dragged
                 event.stopPropagation();
-                
+
                 // Set selected node
                 selectedNodeId = d.id;
-                
+
                 // Highlight path
                 highlightPath(d);
 
@@ -628,7 +628,7 @@ window.ProcessFlow = (function () {
     // Tooltip functions
     function showTooltip(event, d) {
         const tooltip = document.getElementById('tooltip');
-        
+
         // Clear any pending hide timeout
         if (tooltipTimeout) {
             clearTimeout(tooltipTimeout);
@@ -687,22 +687,22 @@ window.ProcessFlow = (function () {
         tooltip.style.top = (event.pageY + 15) + 'px';
 
         // Add event listeners to tooltip to keep it open
-        tooltip.onmouseover = function() {
+        tooltip.onmouseover = function () {
             if (tooltipTimeout) {
                 clearTimeout(tooltipTimeout);
                 tooltipTimeout = null;
             }
         };
-        
-        tooltip.onmouseout = function() {
-            tooltipTimeout = setTimeout(function() {
+
+        tooltip.onmouseout = function () {
+            tooltipTimeout = setTimeout(function () {
                 tooltip.style.display = 'none';
             }, 300);
         };
     }
 
     function hideTooltip() {
-        tooltipTimeout = setTimeout(function() {
+        tooltipTimeout = setTimeout(function () {
             document.getElementById('tooltip').style.display = 'none';
         }, 300);
     }
@@ -869,7 +869,7 @@ window.ProcessFlow = (function () {
                     `;
                     tbody.appendChild(tr);
                 });
-                
+
                 if (downloadBtn) {
                     downloadBtn.style.display = 'inline-block';
                     downloadBtn.onclick = () => downloadCSV(pathStr.replace(/,/g, '_'));
@@ -889,13 +889,13 @@ window.ProcessFlow = (function () {
 
     function downloadCSV(filenamePrefix) {
         if (!currentClaimsData || currentClaimsData.length === 0) return;
-        
+
         const headers = Object.keys(currentClaimsData[0]);
         const csvContent = [
             headers.join(','),
             ...currentClaimsData.map(row => headers.map(fieldName => JSON.stringify(row[fieldName], (key, value) => value === null ? '' : value)).join(','))
         ].join('\n');
-        
+
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement("a");
         if (link.download !== undefined) {
@@ -921,7 +921,7 @@ window.ProcessFlow = (function () {
     function viewClaim(claimNumber) {
         // Open in new tab
         window.open(`/?claim=${claimNumber}`, '_blank');
-        
+
         // Close modal in current tab
         closeModal();
     }

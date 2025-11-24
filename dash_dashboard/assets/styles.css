@@ -140,7 +140,7 @@ select:focus {
     font-weight: 800;
     color: white;
     line-height: 1.1;
-    text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .stat-label {
@@ -156,7 +156,7 @@ select:focus {
 .stat-divider {
     width: 1px;
     height: 50px;
-    background: linear-gradient(to bottom, transparent, rgba(255,255,255,0.15), transparent);
+    background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.15), transparent);
 }
 
 #tree-container {

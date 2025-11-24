@@ -278,12 +278,12 @@ window.ActivityFlow = (function () {
     function resetLayout() {
         const svg = d3.select('#tree-svg');
         const zoom = svg.node().__zoomBehavior;
-        
+
         // Reset zoom
         if (zoom) {
             svg.transition().duration(750).call(zoom.transform, d3.zoomIdentity);
         }
-        
+
         // Clear fixed positions recursively
         function clearFixed(node) {
             delete node.fx;
@@ -292,7 +292,7 @@ window.ActivityFlow = (function () {
                 node.children.forEach(clearFixed);
             }
         }
-        
+
         if (treeData) {
             clearFixed(treeData);
             // Redraw to restart simulation
@@ -316,13 +316,13 @@ window.ActivityFlow = (function () {
         let svg = containerSel.select('#tree-svg');
         if (svg.empty()) {
             svg = containerSel.append('svg').attr('id', 'tree-svg');
-            
+
             // Add grid background class
             svg.attr('class', 'grid-background');
-            
+
             // Add zoom group
             svg.append('g').attr('id', 'zoom-group');
-            
+
             // Init zoom
             const zoom = d3.zoom()
                 .scaleExtent([0.1, 4])
@@ -330,11 +330,11 @@ window.ActivityFlow = (function () {
                     svg.select('#zoom-group').attr('transform', event.transform);
                 });
             svg.call(zoom);
-            
+
             // Store zoom behavior on svg node for reset
             svg.node().__zoomBehavior = zoom;
         }
-        
+
         // Add Reset Button if not exists
         if (!document.getElementById('reset-chart-btn')) {
             const resetBtn = document.createElement('button');
@@ -354,7 +354,7 @@ window.ActivityFlow = (function () {
             container.style.position = 'relative';
             container.appendChild(resetBtn);
         }
-        
+
         // Add Controls Guide if not exists
         if (!document.getElementById('controls-guide')) {
             const guide = document.createElement('div');
@@ -468,7 +468,7 @@ window.ActivityFlow = (function () {
         function highlightPath(targetNode) {
             // Reset all links
             g.selectAll('.link').classed('highlighted', false);
-            
+
             let curr = targetNode;
             while (curr.parent) {
                 // Find link where target is curr
@@ -478,7 +478,7 @@ window.ActivityFlow = (function () {
                         return targetId === curr.id;
                     })
                     .classed('highlighted', true);
-                
+
                 // Move up to parent
                 curr = allNodes.find(n => n.id === curr.parent);
                 if (!curr) break;
@@ -507,12 +507,12 @@ window.ActivityFlow = (function () {
 
             function dragended(event, d) {
                 if (!event.active) simulation.alphaTarget(0);
-                
+
                 if (!d.hasMoved) {
                     d.fx = d.startFx;
                     d.fy = d.startFy;
                 }
-                
+
                 delete d.startFx;
                 delete d.startFy;
                 delete d.hasMoved;
@@ -550,10 +550,10 @@ window.ActivityFlow = (function () {
             .on('click', async function (event, d) {
                 if (event.defaultPrevented) return; // Dragged
                 event.stopPropagation();
-                
+
                 // Set selected node
                 selectedNodeId = d.id;
-                
+
                 // Highlight path
                 highlightPath(d);
 
@@ -686,7 +686,7 @@ window.ActivityFlow = (function () {
     function showTooltip(event, d) {
         const tooltip = document.getElementById('tooltip');
         if (!tooltip) return;
-        
+
         // Clear any pending hide timeout
         if (tooltipTimeout) {
             clearTimeout(tooltipTimeout);
@@ -710,7 +710,7 @@ window.ActivityFlow = (function () {
         if (d.data.percentage && !d.data.isRoot) {
             html += `<div>Percentage: ${d.data.percentage}%</div>`;
         }
-        
+
         if (!d.data.isRoot && !d.data.isTermination && !d.data.isGroup) {
             html += `<hr style="margin: 5px 0; border: 0; border-top: 1px solid #eee;">`;
             html += `<div style="font-weight: bold; margin-bottom: 3px;">Step Duration:</div>`;
@@ -723,11 +723,11 @@ window.ActivityFlow = (function () {
             if (d.data.maxDuration !== undefined) {
                 html += `<div>Max: ${d.data.maxDuration} min</div>`;
             }
-            
+
             if (d.data.meanCumulativeTime !== undefined || d.data.avgRemainingSteps !== undefined) {
                 html += `<hr style="margin: 5px 0; border: 0; border-top: 1px solid #eee;">`;
                 html += `<div style="font-weight: bold; margin-bottom: 3px;">Process Stats:</div>`;
-                
+
                 if (d.data.meanCumulativeTime !== undefined) {
                     html += `<div>Time from Start (Avg): ${d.data.meanCumulativeTime} min</div>`;
                 }
@@ -738,7 +738,7 @@ window.ActivityFlow = (function () {
                     html += `<div>Avg Steps Remaining: ${d.data.avgRemainingSteps}</div>`;
                 }
             }
-            
+
             // Add Show Claims button
             const safePath = d.data.path.join(';;').replace(/'/g, "\\'");
             html += `<button class="tooltip-btn" onclick="window.ActivityFlow.openClaimsModal('${safePath}')">Show Claims</button>`;
@@ -749,15 +749,15 @@ window.ActivityFlow = (function () {
         tooltip.style.top = (event.pageY + 15) + 'px';
 
         // Add event listeners to tooltip to keep it open
-        tooltip.onmouseover = function() {
+        tooltip.onmouseover = function () {
             if (tooltipTimeout) {
                 clearTimeout(tooltipTimeout);
                 tooltipTimeout = null;
             }
         };
-        
-        tooltip.onmouseout = function() {
-            tooltipTimeout = setTimeout(function() {
+
+        tooltip.onmouseout = function () {
+            tooltipTimeout = setTimeout(function () {
                 tooltip.style.display = 'none';
             }, 300);
         };
@@ -766,7 +766,7 @@ window.ActivityFlow = (function () {
     function hideTooltip() {
         const tooltip = document.getElementById('tooltip');
         if (tooltip) {
-            tooltipTimeout = setTimeout(function() {
+            tooltipTimeout = setTimeout(function () {
                 tooltip.style.display = 'none';
             }, 300);
         }
@@ -859,9 +859,9 @@ window.ActivityFlow = (function () {
                 </div>
             `;
             document.body.insertAdjacentHTML('beforeend', modalHtml);
-            
+
             // Close modal when clicking outside
-            window.onclick = function(event) {
+            window.onclick = function (event) {
                 const modal = document.getElementById('claimsModal');
                 if (event.target == modal) {
                     modal.style.display = "none";
@@ -878,26 +878,26 @@ window.ActivityFlow = (function () {
         const pathDisplay = document.getElementById('modalPathDisplay');
         const tbody = document.getElementById('claimsTableBody');
         const downloadBtn = document.getElementById('downloadBtn');
-        
+
         if (!modal) return;
-        
+
         modal.style.display = "block";
         loading.style.display = "block";
         content.style.display = "none";
         if (downloadBtn) downloadBtn.style.display = 'none';
-        
+
         // Format path for display
         const pathArr = pathStr.split(';;');
         // For activity flow, we might want to show just the activity names
         const displayPath = pathArr.map(p => p.split(' | ')[1] || p).join(' → ');
         pathDisplay.textContent = displayPath;
-        
+
         try {
             const data = await fetchAPI(`/claims-at-step?path=${encodeURIComponent(pathStr)}&type=activity`);
             currentClaimsData = data.claims || [];
-            
+
             tbody.innerHTML = '';
-            
+
             if (data.claims && data.claims.length > 0) {
                 data.claims.forEach(claim => {
                     const tr = document.createElement('tr');
@@ -913,7 +913,7 @@ window.ActivityFlow = (function () {
                     `;
                     tbody.appendChild(tr);
                 });
-                
+
                 if (downloadBtn) {
                     downloadBtn.style.display = 'inline-block';
                     downloadBtn.onclick = () => downloadCSV(pathStr.replace(/;;/g, '_').replace(/ \| /g, '-'));
@@ -921,10 +921,10 @@ window.ActivityFlow = (function () {
             } else {
                 tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No claims found for this path.</td></tr>';
             }
-            
+
             loading.style.display = "none";
             content.style.display = "block";
-            
+
         } catch (error) {
             console.error('Error fetching claims:', error);
             loading.innerHTML = '<p style="color:red">Error loading claims.</p>';
@@ -933,13 +933,13 @@ window.ActivityFlow = (function () {
 
     function downloadCSV(filenamePrefix) {
         if (!currentClaimsData || currentClaimsData.length === 0) return;
-        
+
         const headers = Object.keys(currentClaimsData[0]);
         const csvContent = [
             headers.join(','),
             ...currentClaimsData.map(row => headers.map(fieldName => JSON.stringify(row[fieldName], (key, value) => value === null ? '' : value)).join(','))
         ].join('\n');
-        
+
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement("a");
         if (link.download !== undefined) {
@@ -965,7 +965,7 @@ window.ActivityFlow = (function () {
     function viewClaim(claimNumber) {
         // Open in new tab
         window.open(`/?claim=${claimNumber}`, '_blank');
-        
+
         // Close modal in current tab
         closeModal();
     }
