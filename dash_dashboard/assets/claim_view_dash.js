@@ -17,6 +17,28 @@ window.ClaimView = (function () {
         }
 
         loadClaimNumbers();
+
+        // Check URL params
+        const urlParams = new URLSearchParams(window.location.search);
+        const claimFromUrl = urlParams.get('claim');
+        
+        if (claimFromUrl) {
+             if (claimInput) {
+                claimInput.value = claimFromUrl;
+                setTimeout(searchClaim, 500);
+            }
+        }
+
+        // Check for pending claim view from other tabs
+        const pendingClaim = sessionStorage.getItem('pendingClaimView');
+        if (pendingClaim) {
+            sessionStorage.removeItem('pendingClaimView');
+            if (claimInput) {
+                claimInput.value = pendingClaim;
+                // Small delay to ensure data is loaded if needed, though searchClaim fetches directly
+                setTimeout(searchClaim, 100);
+            }
+        }
     }
 
     async function loadClaimNumbers() {

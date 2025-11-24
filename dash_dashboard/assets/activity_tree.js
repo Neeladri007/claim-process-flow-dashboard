@@ -5,6 +5,10 @@ window.ActivityFlow = (function () {
 
     const API_BASE = '/api';
     let treeData = null;
+    let tooltipTimeout;
+    let currentClaimsData = [];
+    let selectedNodeId = null;
+    let initialStatsData = null;
 
     // Fetch API wrapper
     async function fetchAPI(endpoint) {
@@ -33,11 +37,23 @@ window.ActivityFlow = (function () {
     }
 
     // Load all starting processes and display them with a START root node
-    async function loadAllStartingProcesses() {
+    async function loadAllStartingProcesses(force = false) {
+        // Check if we already have data and not forcing reload
+        if (!force && treeData && initialStatsData) {
+            console.log('Restoring existing tree state...');
+            initModal();
+            updateStats(initialStatsData);
+            drawTree(treeData);
+            hideLoading();
+            return;
+        }
+
+        initModal();
         showLoading();
 
         try {
             const data = await fetchAPI('/activity-flow/starting-nodes');
+            initialStatsData = data.total_claims; // Store for restoration
 
             // Group starting nodes
             const groupedNodes = groupChildrenByProcess(data.starting_nodes);
@@ -53,6 +69,8 @@ window.ActivityFlow = (function () {
                         count: node.count,
                         percentage: node.percentage,
                         avgDuration: node.avg_duration_minutes,
+                        medianDuration: node.median_duration,
+                        maxDuration: node.max_duration,
                         path: [node.node_name],
                         children: [], // Children will be loaded on expand (or pre-loaded?)
                         storedChildren: node.children.map(c => ({
@@ -62,6 +80,8 @@ window.ActivityFlow = (function () {
                             count: c.count,
                             percentage: c.percentage,
                             avgDuration: c.avg_duration_minutes,
+                            medianDuration: c.median_duration,
+                            maxDuration: c.max_duration,
                             path: [c.node_name], // Path needs to be correct?
                             children: [],
                             hasChildren: false // Activities might have next steps, but here they are leaves of the group
@@ -80,6 +100,8 @@ window.ActivityFlow = (function () {
                         count: node.count,
                         percentage: node.percentage,
                         avgDuration: node.avg_duration_minutes,
+                        medianDuration: node.median_duration,
+                        maxDuration: node.max_duration,
                         path: [node.node_name],
                         children: [],
                         hasChildren: true,
@@ -191,6 +213,11 @@ window.ActivityFlow = (function () {
                             count: step.count,
                             percentage: step.percentage,
                             avgDuration: step.avg_duration_minutes,
+                            medianDuration: step.median_duration,
+                            maxDuration: step.max_duration,
+                            meanCumulativeTime: step.mean_cumulative_time,
+                            medianCumulativeTime: step.median_cumulative_time,
+                            avgRemainingSteps: step.avg_remaining_steps,
                             path: childPath, // Path to parent
                             children: [],
                             storedChildren: step.children.map(c => ({
@@ -199,6 +226,8 @@ window.ActivityFlow = (function () {
                                 count: c.count,
                                 percentage: c.percentage,
                                 avgDuration: c.avg_duration_minutes,
+                                medianDuration: c.median_duration,
+                                maxDuration: c.max_duration,
                                 // Path will be calculated when group is expanded
                             })),
                             hasChildren: true,
@@ -217,6 +246,11 @@ window.ActivityFlow = (function () {
                             count: step.count,
                             percentage: step.percentage,
                             avgDuration: step.avg_duration_minutes,
+                            medianDuration: step.median_duration,
+                            maxDuration: step.max_duration,
+                            meanCumulativeTime: step.mean_cumulative_time,
+                            medianCumulativeTime: step.median_cumulative_time,
+                            avgRemainingSteps: step.avg_remaining_steps,
                             path: childPath,
                             children: [],
                             hasChildren: true
@@ -240,6 +274,32 @@ window.ActivityFlow = (function () {
         drawTree(treeData);
     }
 
+    // Reset layout function
+    function resetLayout() {
+        const svg = d3.select('#tree-svg');
+        const zoom = svg.node().__zoomBehavior;
+        
+        // Reset zoom
+        if (zoom) {
+            svg.transition().duration(750).call(zoom.transform, d3.zoomIdentity);
+        }
+        
+        // Clear fixed positions recursively
+        function clearFixed(node) {
+            delete node.fx;
+            delete node.fy;
+            if (node.children) {
+                node.children.forEach(clearFixed);
+            }
+        }
+        
+        if (treeData) {
+            clearFixed(treeData);
+            // Redraw to restart simulation
+            drawTree(treeData);
+        }
+    }
+
     // Draw tree using D3 Force Layout (matching index.html)
     function drawTree(data) {
         const container = document.getElementById('tree-container');
@@ -256,10 +316,61 @@ window.ActivityFlow = (function () {
         let svg = containerSel.select('#tree-svg');
         if (svg.empty()) {
             svg = containerSel.append('svg').attr('id', 'tree-svg');
+            
+            // Add grid background class
+            svg.attr('class', 'grid-background');
+            
+            // Add zoom group
+            svg.append('g').attr('id', 'zoom-group');
+            
+            // Init zoom
+            const zoom = d3.zoom()
+                .scaleExtent([0.1, 4])
+                .on('zoom', (event) => {
+                    svg.select('#zoom-group').attr('transform', event.transform);
+                });
+            svg.call(zoom);
+            
+            // Store zoom behavior on svg node for reset
+            svg.node().__zoomBehavior = zoom;
+        }
+        
+        // Add Reset Button if not exists
+        if (!document.getElementById('reset-chart-btn')) {
+            const resetBtn = document.createElement('button');
+            resetBtn.id = 'reset-chart-btn';
+            resetBtn.className = 'reset-btn';
+            resetBtn.innerHTML = '↺ Reset Chart';
+            resetBtn.onclick = () => {
+                // Reset zoom
+                const svg = d3.select('#tree-svg');
+                const zoom = svg.node().__zoomBehavior;
+                if (zoom) {
+                    svg.transition().duration(750).call(zoom.transform, d3.zoomIdentity);
+                }
+                // Reload data to reset state
+                loadAllStartingProcesses(true);
+            };
+            container.style.position = 'relative';
+            container.appendChild(resetBtn);
+        }
+        
+        // Add Controls Guide if not exists
+        if (!document.getElementById('controls-guide')) {
+            const guide = document.createElement('div');
+            guide.id = 'controls-guide';
+            guide.className = 'controls-guide';
+            guide.innerHTML = `
+                <span>🖱️ Scroll to Zoom</span>
+                <span>✋ Drag background to Pan</span>
+                <span>📍 Drag nodes to Move</span>
+            `;
+            container.appendChild(guide);
         }
 
-        // Clear existing SVG content
-        svg.selectAll('*').remove();
+        // Clear existing SVG content (only inside zoom group)
+        const g = svg.select('#zoom-group');
+        g.selectAll('*').remove();
 
         // Calculate dimensions
         let maxDepth = 1;
@@ -284,9 +395,6 @@ window.ActivityFlow = (function () {
             .attr('width', width)
             .attr('height', height);
 
-        const g = svg.append('g')
-            .attr('transform', 'translate(0, 20)');
-
         drawSingleTree(g, data, width, height);
     }
 
@@ -296,12 +404,22 @@ window.ActivityFlow = (function () {
         const allLinks = [];
 
         root.each(d => {
-            allNodes.push({
+            const node = {
                 id: d.data.id || `${d.data.name}-${d.depth}`,
                 data: d.data,
                 depth: d.depth,
                 parent: d.parent ? (d.parent.data.id || `${d.parent.data.name}-${d.parent.depth}`) : null
-            });
+            };
+
+            // Restore position if previously dragged
+            if (d.data.fx !== undefined) {
+                node.fx = d.data.fx;
+                node.fy = d.data.fy;
+                node.x = d.data.fx;
+                node.y = d.data.fy;
+            }
+
+            allNodes.push(node);
         });
 
         root.links().forEach(link => {
@@ -346,6 +464,66 @@ window.ActivityFlow = (function () {
             .alphaDecay(0.01)
             .velocityDecay(0.4);
 
+        // Highlight path function
+        function highlightPath(targetNode) {
+            // Reset all links
+            g.selectAll('.link').classed('highlighted', false);
+            
+            let curr = targetNode;
+            while (curr.parent) {
+                // Find link where target is curr
+                g.selectAll('.link')
+                    .filter(l => {
+                        const targetId = (l.target && l.target.id) ? l.target.id : l.target;
+                        return targetId === curr.id;
+                    })
+                    .classed('highlighted', true);
+                
+                // Move up to parent
+                curr = allNodes.find(n => n.id === curr.parent);
+                if (!curr) break;
+            }
+        }
+
+        // Drag behavior
+        function drag(simulation) {
+            function dragstarted(event, d) {
+                if (!event.active) simulation.alphaTarget(0.3).restart();
+                d.startFx = d.fx;
+                d.startFy = d.fy;
+                d.fx = d.x;
+                d.fy = d.y;
+                d.hasMoved = false;
+            }
+
+            function dragged(event, d) {
+                d.hasMoved = true;
+                d.fx = event.x;
+                d.fy = event.y;
+                // Persist position
+                d.data.fx = event.x;
+                d.data.fy = event.y;
+            }
+
+            function dragended(event, d) {
+                if (!event.active) simulation.alphaTarget(0);
+                
+                if (!d.hasMoved) {
+                    d.fx = d.startFx;
+                    d.fy = d.startFy;
+                }
+                
+                delete d.startFx;
+                delete d.startFy;
+                delete d.hasMoved;
+            }
+
+            return d3.drag()
+                .on("start", dragstarted)
+                .on("drag", dragged)
+                .on("end", dragended);
+        }
+
         const links = g.selectAll('.link')
             .data(allLinks)
             .enter()
@@ -366,10 +544,19 @@ window.ActivityFlow = (function () {
                 if (d.data.expanded) classes += ' expanded';
                 return classes;
             })
+            .call(drag(simulation))
             .on('mouseover', (event, d) => showTooltip(event, { data: d.data }))
             .on('mouseout', hideTooltip)
             .on('click', async function (event, d) {
+                if (event.defaultPrevented) return; // Dragged
                 event.stopPropagation();
+                
+                // Set selected node
+                selectedNodeId = d.id;
+                
+                // Highlight path
+                highlightPath(d);
+
                 if (d.data.isTermination || d.data.isRoot) return;
 
                 if (d.data.expanded) {
@@ -378,6 +565,15 @@ window.ActivityFlow = (function () {
                     await expandNode(d.data);
                 }
             });
+
+        // Restore selection if exists
+        if (selectedNodeId) {
+            const targetNode = allNodes.find(n => n.id === selectedNodeId);
+            if (targetNode) {
+                // Use setTimeout to ensure links are rendered and simulation has started
+                setTimeout(() => highlightPath(targetNode), 0);
+            }
+        }
 
         // Circles
         nodes.filter(d => !d.data.isRoot).append('circle')
@@ -490,6 +686,13 @@ window.ActivityFlow = (function () {
     function showTooltip(event, d) {
         const tooltip = document.getElementById('tooltip');
         if (!tooltip) return;
+        
+        // Clear any pending hide timeout
+        if (tooltipTimeout) {
+            clearTimeout(tooltipTimeout);
+            tooltipTimeout = null;
+        }
+
         tooltip.style.display = 'block';
 
         let html = `<div class="tooltip-title">${d.data.name}</div>`;
@@ -507,18 +710,66 @@ window.ActivityFlow = (function () {
         if (d.data.percentage && !d.data.isRoot) {
             html += `<div>Percentage: ${d.data.percentage}%</div>`;
         }
-        if (d.data.avgDuration !== undefined && d.data.avgDuration > 0 && !d.data.isRoot) {
-            html += `<div>Avg Duration: ${d.data.avgDuration} min</div>`;
+        
+        if (!d.data.isRoot && !d.data.isTermination && !d.data.isGroup) {
+            html += `<hr style="margin: 5px 0; border: 0; border-top: 1px solid #eee;">`;
+            html += `<div style="font-weight: bold; margin-bottom: 3px;">Step Duration:</div>`;
+            if (d.data.avgDuration !== undefined) {
+                html += `<div>Avg: ${d.data.avgDuration} min</div>`;
+            }
+            if (d.data.medianDuration !== undefined) {
+                html += `<div>Median: ${d.data.medianDuration} min</div>`;
+            }
+            if (d.data.maxDuration !== undefined) {
+                html += `<div>Max: ${d.data.maxDuration} min</div>`;
+            }
+            
+            if (d.data.meanCumulativeTime !== undefined || d.data.avgRemainingSteps !== undefined) {
+                html += `<hr style="margin: 5px 0; border: 0; border-top: 1px solid #eee;">`;
+                html += `<div style="font-weight: bold; margin-bottom: 3px;">Process Stats:</div>`;
+                
+                if (d.data.meanCumulativeTime !== undefined) {
+                    html += `<div>Time from Start (Avg): ${d.data.meanCumulativeTime} min</div>`;
+                }
+                if (d.data.medianCumulativeTime !== undefined) {
+                    html += `<div>Time from Start (Med): ${d.data.medianCumulativeTime} min</div>`;
+                }
+                if (d.data.avgRemainingSteps !== undefined) {
+                    html += `<div>Avg Steps Remaining: ${d.data.avgRemainingSteps}</div>`;
+                }
+            }
+            
+            // Add Show Claims button
+            const safePath = d.data.path.join(';;').replace(/'/g, "\\'");
+            html += `<button class="tooltip-btn" onclick="window.ActivityFlow.openClaimsModal('${safePath}')">Show Claims</button>`;
         }
 
         tooltip.innerHTML = html;
         tooltip.style.left = (event.pageX + 15) + 'px';
         tooltip.style.top = (event.pageY + 15) + 'px';
+
+        // Add event listeners to tooltip to keep it open
+        tooltip.onmouseover = function() {
+            if (tooltipTimeout) {
+                clearTimeout(tooltipTimeout);
+                tooltipTimeout = null;
+            }
+        };
+        
+        tooltip.onmouseout = function() {
+            tooltipTimeout = setTimeout(function() {
+                tooltip.style.display = 'none';
+            }, 300);
+        };
     }
 
     function hideTooltip() {
         const tooltip = document.getElementById('tooltip');
-        if (tooltip) tooltip.style.display = 'none';
+        if (tooltip) {
+            tooltipTimeout = setTimeout(function() {
+                tooltip.style.display = 'none';
+            }, 300);
+        }
     }
 
     function updateStats(totalClaims) {
@@ -527,8 +778,23 @@ window.ActivityFlow = (function () {
         statsDiv.style.display = 'flex';
         statsDiv.innerHTML = `
         <div class="stat-item">
-            <div class="stat-value">${totalClaims}</div>
-            <div class="stat-label">Total Claims</div>
+            <div class="stat-icon-wrapper">
+                📄
+            </div>
+            <div class="stat-content">
+                <div class="stat-value">${totalClaims}</div>
+                <div class="stat-label">Total Claims</div>
+            </div>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat-item">
+            <div class="stat-icon-wrapper">
+                🌳
+            </div>
+            <div class="stat-content">
+                <div class="stat-value">Interactive</div>
+                <div class="stat-label">Activity Tree</div>
+            </div>
         </div>
     `;
     }
@@ -552,11 +818,163 @@ window.ActivityFlow = (function () {
         if (loading) loading.style.display = 'none';
     }
 
-    // Initialize
-    // window.onload = loadAllStartingProcesses;
+    // Initialize modal (same as ProcessFlow, checks existence)
+    function initModal() {
+        if (!document.getElementById('claimsModal')) {
+            const modalHtml = `
+                <div id="claimsModal" class="modal">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <span class="modal-title">Claims at this Step</span>
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                <button id="downloadBtn" class="download-btn" style="display:none; padding: 5px 10px; background-color: #1A1446; color: #FFD000; border: none; border-radius: 4px; cursor: pointer;">Download CSV</button>
+                                <span class="close-modal" onclick="document.getElementById('claimsModal').style.display='none'">&times;</span>
+                            </div>
+                        </div>
+                        <div class="modal-body">
+                            <div id="modalLoading" style="text-align: center; padding: 20px;">
+                                <div class="spinner"></div>
+                                <p>Loading claims...</p>
+                            </div>
+                            <div id="claimsListContent" style="display: none;">
+                                <div style="margin-bottom: 15px; font-style: italic; color: #666;">
+                                    Showing claims that followed the path: <span id="modalPathDisplay" style="font-weight: bold; color: #1A1446;"></span>
+                                </div>
+                                <table class="claims-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Claim Number</th>
+                                            <th>Total Duration (min)</th>
+                                            <th>Remaining Duration (min)</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="claimsTableBody">
+                                        <!-- Rows will be added here -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+            
+            // Close modal when clicking outside
+            window.onclick = function(event) {
+                const modal = document.getElementById('claimsModal');
+                if (event.target == modal) {
+                    modal.style.display = "none";
+                }
+            }
+        }
+    }
+
+    // Open claims modal
+    async function openClaimsModal(pathStr) {
+        const modal = document.getElementById('claimsModal');
+        const loading = document.getElementById('modalLoading');
+        const content = document.getElementById('claimsListContent');
+        const pathDisplay = document.getElementById('modalPathDisplay');
+        const tbody = document.getElementById('claimsTableBody');
+        const downloadBtn = document.getElementById('downloadBtn');
+        
+        if (!modal) return;
+        
+        modal.style.display = "block";
+        loading.style.display = "block";
+        content.style.display = "none";
+        if (downloadBtn) downloadBtn.style.display = 'none';
+        
+        // Format path for display
+        const pathArr = pathStr.split(';;');
+        // For activity flow, we might want to show just the activity names
+        const displayPath = pathArr.map(p => p.split(' | ')[1] || p).join(' → ');
+        pathDisplay.textContent = displayPath;
+        
+        try {
+            const data = await fetchAPI(`/claims-at-step?path=${encodeURIComponent(pathStr)}&type=activity`);
+            currentClaimsData = data.claims || [];
+            
+            tbody.innerHTML = '';
+            
+            if (data.claims && data.claims.length > 0) {
+                data.claims.forEach(claim => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${claim.Claim_Number}</td>
+                        <td>${claim.total_duration}</td>
+                        <td>${claim.remaining_duration}</td>
+                        <td>
+                            <button class="claim-link-btn" onclick="window.ActivityFlow.viewClaim(${claim.Claim_Number})">
+                                View Full Track
+                            </button>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+                
+                if (downloadBtn) {
+                    downloadBtn.style.display = 'inline-block';
+                    downloadBtn.onclick = () => downloadCSV(pathStr.replace(/;;/g, '_').replace(/ \| /g, '-'));
+                }
+            } else {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No claims found for this path.</td></tr>';
+            }
+            
+            loading.style.display = "none";
+            content.style.display = "block";
+            
+        } catch (error) {
+            console.error('Error fetching claims:', error);
+            loading.innerHTML = '<p style="color:red">Error loading claims.</p>';
+        }
+    }
+
+    function downloadCSV(filenamePrefix) {
+        if (!currentClaimsData || currentClaimsData.length === 0) return;
+        
+        const headers = Object.keys(currentClaimsData[0]);
+        const csvContent = [
+            headers.join(','),
+            ...currentClaimsData.map(row => headers.map(fieldName => JSON.stringify(row[fieldName], (key, value) => value === null ? '' : value)).join(','))
+        ].join('\n');
+        
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        if (link.download !== undefined) {
+            const url = URL.createObjectURL(blob);
+            link.setAttribute("href", url);
+            link.setAttribute("download", `claims_${filenamePrefix}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+    }
+
+    // Close modal
+    function closeModal() {
+        const modal = document.getElementById('claimsModal');
+        if (modal) {
+            modal.style.display = "none";
+        }
+    }
+
+    // View specific claim
+    function viewClaim(claimNumber) {
+        // Open in new tab
+        window.open(`/?claim=${claimNumber}`, '_blank');
+        
+        // Close modal in current tab
+        closeModal();
+    }
 
     return {
-        init: loadAllStartingProcesses
+        init: loadAllStartingProcesses,
+        openClaimsModal: openClaimsModal,
+        closeModal: closeModal,
+        viewClaim: viewClaim
     };
 
 })();

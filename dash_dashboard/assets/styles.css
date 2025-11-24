@@ -73,32 +73,90 @@ select:focus {
 }
 
 .stats-bar {
-    background: linear-gradient(135deg, #1A1446 0%, #2a2266 100%);
-    padding: 25px;
-    border-radius: 10px;
+    background: linear-gradient(135deg, #1A1446 0%, #16103a 100%);
+    padding: 25px 40px;
+    border-radius: 16px;
     margin-bottom: 30px;
     display: flex;
-    justify-content: space-around;
-    flex-wrap: wrap;
-    gap: 30px;
+    justify-content: space-evenly;
+    align-items: center;
     color: white;
+    box-shadow: 0 10px 25px -5px rgba(26, 20, 70, 0.4), 0 8px 10px -6px rgba(26, 20, 70, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     border-bottom: 4px solid #FFD000;
+    position: relative;
+    overflow: hidden;
+}
+
+/* Add a subtle shine effect */
+.stats-bar::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
 }
 
 .stat-item {
-    text-align: center;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 10px;
+    transition: transform 0.3s ease;
+}
+
+.stat-item:hover {
+    transform: translateY(-2px);
+}
+
+.stat-icon-wrapper {
+    background: rgba(255, 208, 0, 0.15);
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #FFD000;
+    border: 1px solid rgba(255, 208, 0, 0.3);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.stat-icon-wrapper svg {
+    width: 28px;
+    height: 28px;
+    stroke-width: 2;
+}
+
+.stat-content {
+    display: flex;
+    flex-direction: column;
 }
 
 .stat-value {
-    font-size: 2.5em;
-    font-weight: bold;
-    color: #FFD000;
+    font-size: 2.2em;
+    font-weight: 800;
+    color: white;
+    line-height: 1.1;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }
 
 .stat-label {
-    font-size: 1em;
-    margin-top: 8px;
-    opacity: 0.95;
+    font-size: 0.85em;
+    color: #a0aec0;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    font-weight: 600;
+    margin-top: 6px;
+}
+
+/* Vertical divider */
+.stat-divider {
+    width: 1px;
+    height: 50px;
+    background: linear-gradient(to bottom, transparent, rgba(255,255,255,0.15), transparent);
 }
 
 #tree-container {
@@ -110,6 +168,13 @@ select:focus {
     background: #fafbfc;
     min-height: 600px;
     position: relative;
+}
+
+/* Add grid pattern to tree container */
+.grid-background {
+    background-image: radial-gradient(#e0e0e0 1px, transparent 1px);
+    background-size: 20px 20px;
+    background-color: #fafbfc;
 }
 
 .node circle {
@@ -187,13 +252,20 @@ select:focus {
     stroke-width: 3px;
 }
 
+.link.highlighted {
+    stroke: #FFD000;
+    stroke-width: 4px;
+    stroke-opacity: 1;
+    filter: drop-shadow(0 0 4px rgba(255, 208, 0, 0.5));
+}
+
 .tooltip {
     position: absolute;
     padding: 12px 16px;
     background: rgba(26, 20, 70, 0.95);
     color: white;
     border-radius: 8px;
-    pointer-events: none;
+    pointer-events: auto;
     font-size: 13px;
     z-index: 1000;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
@@ -543,4 +615,192 @@ button:hover {
     background: linear-gradient(90deg, #1A1446, #2a2266);
     border-radius: 4px;
     transition: width 1s ease-out;
+}
+
+/* Reset Button */
+.reset-btn {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    z-index: 100;
+    padding: 8px 16px;
+    background: white;
+    border: 2px solid #1A1446;
+    color: #1A1446;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    transition: all 0.2s;
+}
+
+.reset-btn:hover {
+    background: #1A1446;
+    color: #FFD000;
+}
+
+/* Controls Guide */
+.controls-guide {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    z-index: 100;
+    background: rgba(255, 255, 255, 0.9);
+    padding: 10px 15px;
+    border-radius: 8px;
+    border: 1px solid #e0e0e0;
+    font-size: 12px;
+    color: #666;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+    pointer-events: none;
+}
+
+.controls-guide span {
+    display: block;
+    margin-bottom: 4px;
+}
+
+.controls-guide span:last-child {
+    margin-bottom: 0;
+}
+
+.controls-guide i {
+    margin-right: 6px;
+    color: #1A1446;
+}
+
+/* Modal Styles */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 2000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+}
+
+.modal-content {
+    background-color: #fefefe;
+    margin: 5% auto;
+    padding: 0;
+    border: 1px solid #888;
+    width: 80%;
+    max-width: 900px;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateY(-50px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.modal-header {
+    padding: 20px 25px;
+    background: linear-gradient(135deg, #1A1446 0%, #2a2266 100%);
+    color: white;
+    border-top-left-radius: 12px;
+    border-top-right-radius: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 4px solid #FFD000;
+}
+
+.modal-title {
+    font-size: 1.4em;
+    font-weight: bold;
+}
+
+.close-modal {
+    color: #aaa;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: color 0.2s;
+}
+
+.close-modal:hover,
+.close-modal:focus {
+    color: #FFD000;
+    text-decoration: none;
+}
+
+.modal-body {
+    padding: 25px;
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+.claims-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+}
+
+.claims-table th,
+.claims-table td {
+    padding: 12px 15px;
+    text-align: left;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.claims-table th {
+    background-color: #f8f9fa;
+    color: #1A1446;
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+}
+
+.claims-table tr:hover {
+    background-color: #f5f7fa;
+}
+
+.claim-link-btn {
+    padding: 6px 12px;
+    background-color: #1A1446;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: background 0.2s;
+}
+
+.claim-link-btn:hover {
+    background-color: #FFD000;
+    color: #1A1446;
+}
+
+.tooltip-btn {
+    display: block;
+    width: 100%;
+    margin-top: 10px;
+    padding: 6px;
+    background: #FFD000;
+    color: #1A1446;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 12px;
+    text-align: center;
+    transition: background 0.2s;
+}
+
+.tooltip-btn:hover {
+    background-color: #e6bc00;
 }

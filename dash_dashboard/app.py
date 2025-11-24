@@ -103,8 +103,18 @@ def get_starting_processes():
     avg_durations = starting_processes.groupby('Process')['Active_Minutes'].mean().round(1).reset_index()
     avg_durations.columns = ['process', 'avg_duration']
     
+    # Calculate median duration
+    median_durations = starting_processes.groupby('Process')['Active_Minutes'].median().round(1).reset_index()
+    median_durations.columns = ['process', 'median_duration']
+    
+    # Calculate max duration
+    max_durations = starting_processes.groupby('Process')['Active_Minutes'].max().round(1).reset_index()
+    max_durations.columns = ['process', 'max_duration']
+    
     # Merge
     result = pd.merge(process_counts, avg_durations, on='process')
+    result = pd.merge(result, median_durations, on='process')
+    result = pd.merge(result, max_durations, on='process')
     
     return jsonify({
         "total_claims": total_claims,
@@ -149,7 +159,51 @@ def get_process_flow(process_name):
         avg_durations = next_steps_df.groupby('Process')['Active_Minutes'].mean().round(1).reset_index()
         avg_durations.columns = ['process', 'avg_duration']
         
+        # Median duration
+        median_durations = next_steps_df.groupby('Process')['Active_Minutes'].median().round(1).reset_index()
+        median_durations.columns = ['process', 'median_duration']
+        
+        # Max duration
+        max_durations = next_steps_df.groupby('Process')['Active_Minutes'].max().round(1).reset_index()
+        max_durations.columns = ['process', 'max_duration']
+        
+        # Calculate cumulative time stats (time from start to end of this step)
+        # We need to calculate cumulative time for each claim up to this step
+        # Since we filtered for seq=1, we can just sum the first two steps for these claims
+        
+        # Get the full path for these claims (seq 0 and 1)
+        path_df = filtered_df[filtered_df['seq'] <= 1].copy()
+        cumulative_times = path_df.groupby('Claim_Number')['Active_Minutes'].sum().reset_index()
+        cumulative_times.columns = ['Claim_Number', 'cumulative_time']
+        
+        # Join back to next_steps_df to group by process
+        next_steps_with_cum = pd.merge(next_steps_df, cumulative_times, on='Claim_Number')
+        
+        cum_mean = next_steps_with_cum.groupby('Process')['cumulative_time'].mean().round(1).reset_index()
+        cum_mean.columns = ['process', 'mean_cumulative_time']
+        
+        cum_median = next_steps_with_cum.groupby('Process')['cumulative_time'].median().round(1).reset_index()
+        cum_median.columns = ['process', 'median_cumulative_time']
+        
+        # Calculate remaining steps (avg)
+        # For each claim, count total steps and subtract current step index (1)
+        # We need the total count for each claim
+        claim_total_steps = collapsed_df[collapsed_df['Claim_Number'].isin(continuing_claims)].groupby('Claim_Number').size().reset_index(name='total_steps')
+        
+        # Join with next_steps_df
+        next_steps_with_total = pd.merge(next_steps_df, claim_total_steps, on='Claim_Number')
+        next_steps_with_total['remaining_steps'] = next_steps_with_total['total_steps'] - 2 # -2 because 0-indexed and we are at step 1 (so 2 steps done)
+        
+        avg_remaining = next_steps_with_total.groupby('Process')['remaining_steps'].mean().round(1).reset_index()
+        avg_remaining.columns = ['process', 'avg_remaining_steps']
+
         result_df = pd.merge(next_step_counts, avg_durations, on='process')
+        result_df = pd.merge(result_df, median_durations, on='process')
+        result_df = pd.merge(result_df, max_durations, on='process')
+        result_df = pd.merge(result_df, cum_mean, on='process')
+        result_df = pd.merge(result_df, cum_median, on='process')
+        result_df = pd.merge(result_df, avg_remaining, on='process', how='left')
+        result_df['avg_remaining_steps'] = result_df['avg_remaining_steps'].fillna(0)
         
         return jsonify({
             "source_process": process_name,
@@ -218,7 +272,49 @@ def get_process_flow_after_path():
         avg_durations = target_rows.groupby('Process')['Active_Minutes'].mean().round(1).reset_index()
         avg_durations.columns = ['process', 'avg_duration']
         
+        # Median duration
+        median_durations = target_rows.groupby('Process')['Active_Minutes'].median().round(1).reset_index()
+        median_durations.columns = ['process', 'median_duration']
+        
+        # Max duration
+        max_durations = target_rows.groupby('Process')['Active_Minutes'].max().round(1).reset_index()
+        max_durations.columns = ['process', 'max_duration']
+        
+        # Cumulative time stats
+        # Sum active minutes for each claim up to the target row (inclusive)
+        # We can filter valid_subset for seq <= len(path)
+        path_subset = valid_subset[valid_subset['seq'] <= len(path)]
+        cumulative_times = path_subset.groupby('Claim_Number')['Active_Minutes'].sum().reset_index()
+        cumulative_times.columns = ['Claim_Number', 'cumulative_time']
+        
+        # Join back to target_rows to group by process
+        target_with_cum = pd.merge(target_rows, cumulative_times, on='Claim_Number')
+        
+        cum_mean = target_with_cum.groupby('Process')['cumulative_time'].mean().round(1).reset_index()
+        cum_mean.columns = ['process', 'mean_cumulative_time']
+        
+        cum_median = target_with_cum.groupby('Process')['cumulative_time'].median().round(1).reset_index()
+        cum_median.columns = ['process', 'median_cumulative_time']
+        
+        # Remaining steps
+        # Get total steps for these claims
+        claim_total_steps = collapsed_df[collapsed_df['Claim_Number'].isin(valid_claims)].groupby('Claim_Number').size().reset_index(name='total_steps')
+        
+        target_with_total = pd.merge(target_rows, claim_total_steps, on='Claim_Number')
+        # Current step index is len(path). So steps done is len(path) + 1.
+        target_with_total['remaining_steps'] = target_with_total['total_steps'] - (len(path) + 1)
+        
+        avg_remaining = target_with_total.groupby('Process')['remaining_steps'].mean().round(1).reset_index()
+        avg_remaining.columns = ['process', 'avg_remaining_steps']
+        
         result_df = pd.merge(next_step_counts, avg_durations, on='process')
+        result_df = pd.merge(result_df, median_durations, on='process')
+        result_df = pd.merge(result_df, max_durations, on='process')
+        result_df = pd.merge(result_df, cum_mean, on='process')
+        result_df = pd.merge(result_df, cum_median, on='process')
+        result_df = pd.merge(result_df, avg_remaining, on='process', how='left')
+        result_df['avg_remaining_steps'] = result_df['avg_remaining_steps'].fillna(0)
+        
         next_steps_data = result_df.to_dict(orient='records')
     else:
         next_steps_data = []
@@ -252,8 +348,18 @@ def get_activity_starting_nodes():
     avg_durations = starting_nodes.groupby('Node_Name')['Active_Minutes'].mean().round(1).reset_index()
     avg_durations.columns = ['node_name', 'avg_duration_minutes']
     
+    # Median duration
+    median_durations = starting_nodes.groupby('Node_Name')['Active_Minutes'].median().round(1).reset_index()
+    median_durations.columns = ['node_name', 'median_duration']
+    
+    # Max duration
+    max_durations = starting_nodes.groupby('Node_Name')['Active_Minutes'].max().round(1).reset_index()
+    max_durations.columns = ['node_name', 'max_duration']
+    
     # Merge
     result = pd.merge(node_counts, avg_durations, on='node_name')
+    result = pd.merge(result, median_durations, on='node_name')
+    result = pd.merge(result, max_durations, on='node_name')
     
     # Add process name for grouping
     result['process'] = result['node_name'].apply(lambda x: x.split(' | ')[0])
@@ -320,8 +426,43 @@ def get_activity_next_steps():
         avg_durations = target_rows.groupby('Node_Name')['Active_Minutes'].mean().round(1).reset_index()
         avg_durations.columns = ['node_name', 'avg_duration_minutes']
         
+        # Median duration
+        median_durations = target_rows.groupby('Node_Name')['Active_Minutes'].median().round(1).reset_index()
+        median_durations.columns = ['node_name', 'median_duration']
+        
+        # Max duration
+        max_durations = target_rows.groupby('Node_Name')['Active_Minutes'].max().round(1).reset_index()
+        max_durations.columns = ['node_name', 'max_duration']
+        
+        # Cumulative time stats
+        path_subset = valid_subset[valid_subset['seq'] <= len(path)]
+        cumulative_times = path_subset.groupby('Claim_Number')['Active_Minutes'].sum().reset_index()
+        cumulative_times.columns = ['Claim_Number', 'cumulative_time']
+        
+        target_with_cum = pd.merge(target_rows, cumulative_times, on='Claim_Number')
+        
+        cum_mean = target_with_cum.groupby('Node_Name')['cumulative_time'].mean().round(1).reset_index()
+        cum_mean.columns = ['node_name', 'mean_cumulative_time']
+        
+        cum_median = target_with_cum.groupby('Node_Name')['cumulative_time'].median().round(1).reset_index()
+        cum_median.columns = ['node_name', 'median_cumulative_time']
+        
+        # Remaining steps
+        claim_total_steps = activity_collapsed_df[activity_collapsed_df['Claim_Number'].isin(valid_claims)].groupby('Claim_Number').size().reset_index(name='total_steps')
+        
+        target_with_total = pd.merge(target_rows, claim_total_steps, on='Claim_Number')
+        target_with_total['remaining_steps'] = target_with_total['total_steps'] - (len(path) + 1)
+        
+        avg_remaining = target_with_total.groupby('Node_Name')['remaining_steps'].mean().round(1).reset_index()
+        avg_remaining.columns = ['node_name', 'avg_remaining_steps']
+        
         result_df = pd.merge(next_step_counts, avg_durations, on='node_name')
-        result_df['process'] = result_df['node_name'].apply(lambda x: x.split(' | ')[0])
+        result_df = pd.merge(result_df, median_durations, on='node_name')
+        result_df = pd.merge(result_df, max_durations, on='node_name')
+        result_df = pd.merge(result_df, cum_mean, on='node_name')
+        result_df = pd.merge(result_df, cum_median, on='node_name')
+        result_df = pd.merge(result_df, avg_remaining, on='node_name', how='left')
+        result_df['avg_remaining_steps'] = result_df['avg_remaining_steps'].fillna(0)
         
         next_steps_data = result_df.to_dict(orient='records')
     else:
@@ -335,6 +476,78 @@ def get_activity_next_steps():
             "percentage": round(terminations / total_flow * 100, 1)
         },
         "next_steps": next_steps_data
+    })
+
+@server.route('/api/claims-at-step')
+def get_claims_at_step():
+    path_str = request.args.get('path')
+    flow_type = request.args.get('type', 'process') # 'process' or 'activity'
+    
+    if not path_str:
+        return jsonify({"error": "Path required"}), 400
+        
+    if flow_type == 'process':
+        separator = ','
+        data_df = collapsed_df
+        col_name = 'Process'
+    else:
+        separator = ';;'
+        data_df = activity_collapsed_df
+        col_name = 'Node_Name'
+        
+    path = path_str.split(separator)
+    
+    if data_df is None:
+        return jsonify({"error": "Data not loaded"}), 500
+        
+    # Filter claims that have the first node of the path
+    first_node = path[0]
+    possible_claims = data_df[data_df[col_name] == first_node]['Claim_Number'].unique()
+    subset_df = data_df[data_df['Claim_Number'].isin(possible_claims)]
+    
+    # Group sequences
+    sequences = subset_df.sort_values(['Claim_Number', 'First_TimeStamp']).groupby('Claim_Number')[col_name].agg(list)
+    
+    valid_claims = []
+    
+    for claim_id, seq in sequences.items():
+        # Check if claim followed the exact path
+        if len(seq) >= len(path):
+            if seq[:len(path)] == path:
+                valid_claims.append(claim_id)
+                
+    if not valid_claims:
+        return jsonify({"claims": []})
+        
+    # Calculate remaining duration for these claims
+    # We need the sum of Active_Minutes for all steps AFTER the current path
+    
+    # Get all records for valid claims
+    claim_records = data_df[data_df['Claim_Number'].isin(valid_claims)].copy()
+    claim_records['seq'] = claim_records.groupby('Claim_Number').cumcount()
+    
+    # Filter for steps after the path (index >= len(path))
+    remaining_steps = claim_records[claim_records['seq'] >= len(path)]
+    
+    # Sum remaining duration per claim
+    remaining_durations = remaining_steps.groupby('Claim_Number')['Active_Minutes'].sum().reset_index()
+    remaining_durations.columns = ['Claim_Number', 'remaining_duration']
+    
+    # Get total duration for context
+    total_durations = claim_records.groupby('Claim_Number')['Active_Minutes'].sum().reset_index()
+    total_durations.columns = ['Claim_Number', 'total_duration']
+    
+    # Merge
+    result = pd.DataFrame({'Claim_Number': valid_claims})
+    result = pd.merge(result, remaining_durations, on='Claim_Number', how='left')
+    result = pd.merge(result, total_durations, on='Claim_Number', how='left')
+    
+    # Fill NaN with 0 (means no remaining steps, i.e., finished)
+    result['remaining_duration'] = result['remaining_duration'].fillna(0).round(1)
+    result['total_duration'] = result['total_duration'].round(1)
+    
+    return jsonify({
+        "claims": result.to_dict(orient='records')
     })
 
 @server.route('/api/claim-numbers')
@@ -373,6 +586,7 @@ def get_claim_path(claim_number):
 # --- Layout & Callbacks ---
 
 app.layout = html.Div([
+    dcc.Location(id='url', refresh=False),
     dcc.Location(id='url-refresh', refresh=True),
     html.Div([
         html.H1("WEA Claim Process Flow Dashboard", style={'textAlign': 'center', 'color': '#1A1446'}),
@@ -395,6 +609,12 @@ app.layout = html.Div([
     
     html.Div(id='tabs-content')
 ])
+
+@app.callback(Output('tabs', 'value'), Input('url', 'search'))
+def set_tab(search):
+    if search and 'claim=' in search:
+        return 'claim-view'
+    return dash.no_update
 
 @app.callback(Output('tabs-content', 'children'), Input('tabs', 'value'))
 def render_content(tab):
@@ -550,6 +770,9 @@ def restart_dashboard(n_clicks):
     if n_clicks > 0:
         return '/'
     return dash.no_update
+
+def server_func():
+    return server
 
 if __name__ == '__main__':
     app.run(debug=True, port=8050)
