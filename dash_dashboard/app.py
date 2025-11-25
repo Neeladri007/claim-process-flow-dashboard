@@ -570,9 +570,14 @@ def get_claim_path(claim_number):
     
     path = []
     for _, row in claim_data.iterrows():
+        # Handle NaN activity values
+        activity_val = row['Activity'] if 'Activity' in row else None
+        if pd.isna(activity_val):
+            activity_val = "Unknown"
+
         path.append({
             "process": row['Process'],
-            "activity": row['Activity'] if 'Activity' in row else None,
+            "activity": activity_val,
             "timestamp": row['First_TimeStamp'].isoformat(),
             "active_minutes": float(row['Active_Minutes'])
         })
