@@ -10,6 +10,7 @@ window.ProcessFlow = (function () {
     let currentClaimsData = [];
     let selectedNodeId = null;
     let initialStatsData = null;
+    let sortState = { column: null, direction: 'asc' };
 
     // Fetch API wrapper
     async function fetchAPI(endpoint) {
@@ -802,8 +803,12 @@ window.ProcessFlow = (function () {
                                     <thead>
                                         <tr>
                                             <th>Claim Number</th>
-                                            <th>Total Duration (min)</th>
-                                            <th>Remaining Duration (min)</th>
+                                            <th style="cursor: pointer;" onclick="window.ProcessFlow.sortClaims('total_duration')">
+                                                Total Duration (min) <span id="sort-icon-total_duration" style="font-size: 0.8em; margin-left: 5px;">↕</span>
+                                            </th>
+                                            <th style="cursor: pointer;" onclick="window.ProcessFlow.sortClaims('remaining_duration')">
+                                                Remaining Duration (min) <span id="sort-icon-remaining_duration" style="font-size: 0.8em; margin-left: 5px;">↕</span>
+                                            </th>
                                             <th>Action</th>
                                         </tr>
                                     </thead>
@@ -828,13 +833,76 @@ window.ProcessFlow = (function () {
         }
     }
 
+    // Sort claims
+    function sortClaims(column) {
+        if (sortState.column === column) {
+            sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc';
+        } else {
+            sortState.column = column;
+            sortState.direction = 'asc';
+        }
+
+        currentClaimsData.sort((a, b) => {
+            let valA = a[column];
+            let valB = b[column];
+
+            // Handle nulls/undefined
+            if (valA === null || valA === undefined) valA = -Infinity;
+            if (valB === null || valB === undefined) valB = -Infinity;
+
+            if (valA < valB) return sortState.direction === 'asc' ? -1 : 1;
+            if (valA > valB) return sortState.direction === 'asc' ? 1 : -1;
+            return 0;
+        });
+
+        renderClaimsTable();
+    }
+
+    // Render claims table
+    function renderClaimsTable() {
+        const tbody = document.getElementById('claimsTableBody');
+        if (!tbody) return;
+
+        tbody.innerHTML = '';
+
+        // Update icons
+        ['total_duration', 'remaining_duration'].forEach(col => {
+            const icon = document.getElementById(`sort-icon-${col}`);
+            if (icon) {
+                if (sortState.column === col) {
+                    icon.textContent = sortState.direction === 'asc' ? '↑' : '↓';
+                } else {
+                    icon.textContent = '↕';
+                }
+            }
+        });
+
+        if (currentClaimsData && currentClaimsData.length > 0) {
+            currentClaimsData.forEach(claim => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${claim.Claim_Number}</td>
+                    <td>${claim.total_duration}</td>
+                    <td>${claim.remaining_duration}</td>
+                    <td>
+                        <button class="claim-link-btn" onclick="window.ProcessFlow.viewClaim(${claim.Claim_Number})">
+                            View Full Track
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        } else {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No claims found for this path.</td></tr>';
+        }
+    }
+
     // Open claims modal
     async function openClaimsModal(pathStr) {
         const modal = document.getElementById('claimsModal');
         const loading = document.getElementById('modalLoading');
         const content = document.getElementById('claimsListContent');
         const pathDisplay = document.getElementById('modalPathDisplay');
-        const tbody = document.getElementById('claimsTableBody');
         const downloadBtn = document.getElementById('downloadBtn');
 
         if (!modal) return;
@@ -852,30 +920,15 @@ window.ProcessFlow = (function () {
             const data = await fetchAPI(`/claims-at-step?path=${encodeURIComponent(pathStr)}&type=process`);
             currentClaimsData = data.claims || [];
 
-            tbody.innerHTML = '';
+            // Reset sort state
+            sortState = { column: null, direction: 'asc' };
+            renderClaimsTable();
 
             if (data.claims && data.claims.length > 0) {
-                data.claims.forEach(claim => {
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `
-                        <td>${claim.Claim_Number}</td>
-                        <td>${claim.total_duration}</td>
-                        <td>${claim.remaining_duration}</td>
-                        <td>
-                            <button class="claim-link-btn" onclick="window.ProcessFlow.viewClaim(${claim.Claim_Number})">
-                                View Full Track
-                            </button>
-                        </td>
-                    `;
-                    tbody.appendChild(tr);
-                });
-
                 if (downloadBtn) {
                     downloadBtn.style.display = 'inline-block';
                     downloadBtn.onclick = () => downloadCSV(pathStr.replace(/,/g, '_'));
                 }
-            } else {
-                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No claims found for this path.</td></tr>';
             }
 
             loading.style.display = "none";
@@ -930,7 +983,8 @@ window.ProcessFlow = (function () {
         init: loadAllStartingProcesses,
         openClaimsModal: openClaimsModal,
         closeModal: closeModal,
-        viewClaim: viewClaim
+        viewClaim: viewClaim,
+        sortClaims: sortClaims
     };
 
 })();
