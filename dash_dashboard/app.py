@@ -667,7 +667,21 @@ def render_content(tab):
                         html.Div([html.Div(id='startDate', className='summary-value'), html.Div('Start Date', className='summary-label')], className='summary-item'),
                         html.Div([html.Div(id='endDate', className='summary-value'), html.Div('End Date', className='summary-label')], className='summary-item'),
                     ], className='stats-summary', style={'display': 'flex', 'justifyContent': 'space-around', 'marginBottom': '20px', 'padding': '15px', 'background': '#f8f9fa', 'borderRadius': '10px', 'borderLeft': '5px solid #FFD000'}),
-                    html.Div(id='timeline', className='timeline')
+                    
+                    html.Div([
+                        # Left Column: Timeline
+                        html.Div([
+                            html.H3("Timeline", style={'color': '#1A1446', 'marginBottom': '15px', 'borderBottom': '2px solid #eee', 'paddingBottom': '10px'}),
+                            html.Div(id='timeline', className='timeline')
+                        ], style={'flex': '1', 'marginRight': '20px', 'paddingTop': '20px'}),
+                        
+                        # Right Column: Visualizations
+                        html.Div([
+                            html.H3("Analysis", style={'color': '#1A1446', 'marginBottom': '15px', 'borderBottom': '2px solid #eee', 'paddingBottom': '10px'}),
+                            html.Div(id='process-analysis', style={'marginBottom': '30px'}),
+                            html.Div(id='activity-analysis')
+                        ], style={'flex': '1', 'paddingLeft': '20px', 'borderLeft': '1px solid #e0e0e0', 'backgroundColor': '#fcfcfc', 'borderRadius': '8px', 'padding': '20px'})
+                    ], style={'display': 'flex', 'flexDirection': 'row', 'gap': '20px'})
                 ])
             ], className='container')
         ])
@@ -771,7 +785,7 @@ def restart_dashboard(n_clicks):
         return '/'
     return dash.no_update
 
-def server_func():
+def get_server():
     return server
 
 if __name__ == '__main__':
