@@ -92,33 +92,15 @@ def process_aggregated_dataframe(dataframe):
                 first_main_idx = i
                 break
         
+        # If no main phases found, label everything as Investigation
         if first_main_idx == -1:
             return ['Investigation'] * len(processes)
             
-        # Investigation phase
+        # Only label the initial steps before first main phase as Investigation
         new_processes.extend(['Investigation'] * first_main_idx)
         
-        # Rest
-        rest_processes = processes[first_main_idx:]
-        
-        # Calculate next mains for rest
-        next_mains = [None] * len(rest_processes)
-        curr_next = None
-        for i in range(len(rest_processes) - 1, -1, -1):
-            if rest_processes[i] in MAIN_PHASES:
-                curr_next = rest_processes[i]
-            next_mains[i] = curr_next
-            
-        last_seen_main = None
-        for i, p in enumerate(rest_processes):
-            if p in MAIN_PHASES:
-                new_processes.append(p)
-                last_seen_main = p
-            else:
-                if next_mains[i] is not None and next_mains[i] != p:
-                    new_processes.append(next_mains[i])
-                else:
-                    new_processes.append(last_seen_main)
+        # After first main phase, keep everything as is
+        new_processes.extend(processes[first_main_idx:])
                     
         return new_processes
 
