@@ -127,7 +127,7 @@ window.ClaimView = (function () {
                 const controlsDiv = document.createElement('div');
                 controlsDiv.style.textAlign = 'right';
                 controlsDiv.style.marginBottom = '10px';
-                
+
                 const viewBtn = document.createElement('button');
                 viewBtn.id = 'claim-view-mode-btn';
                 viewBtn.className = viewMode === 'detailed' ? 'view-mode-btn detailed' : 'view-mode-btn aggregated';
@@ -136,7 +136,7 @@ window.ClaimView = (function () {
                 viewBtn.style.top = 'auto';
                 viewBtn.style.right = 'auto';
                 viewBtn.onclick = toggleViewMode;
-                
+
                 controlsDiv.appendChild(viewBtn);
                 statsDiv.parentNode.insertBefore(controlsDiv, statsDiv);
             }
@@ -152,10 +152,10 @@ window.ClaimView = (function () {
         const investigationMinutes = data.path
             .filter(step => step.process === 'Investigation')
             .reduce((sum, step) => sum + step.active_minutes, 0);
-        
+
         const investigationStat = document.getElementById('investigationStat');
         const investigationDuration = document.getElementById('investigationDuration');
-        
+
         if (investigationMinutes > 0 && viewMode === 'aggregated') {
             investigationDuration.textContent = `${investigationMinutes.toFixed(2)}m`;
             investigationStat.style.display = 'block';
@@ -225,7 +225,7 @@ window.ClaimView = (function () {
             item.style.animationDelay = `${index * 0.1}s`;
 
             const processPercentage = maxProcessDuration > 0 ? (group.totalDuration / maxProcessDuration) * 100 : 0;
-            
+
             // Special styling for Investigation phase
             const isInvestigation = group.process === 'Investigation';
             // Use 'background' to override gradients and !important to ensure specificity
@@ -237,9 +237,9 @@ window.ClaimView = (function () {
             group.activities.forEach(step => {
                 const date = new Date(step.timestamp);
                 const formattedDate = date.toLocaleString();
-                
+
                 const countBadge = step.count > 1 ? `<span style="background:#FFD000; color:#1A1446; padding:1px 5px; border-radius:8px; font-size:0.75em; margin-left:5px; font-weight:bold;">x${step.count}</span>` : '';
-                
+
                 // Special styling for Investigation activities
                 const activityBarStyle = isInvestigation ? 'background: linear-gradient(90deg, #6366f1, #818cf8);' : '';
                 const activityBorderStyle = isInvestigation ? 'border-left: 3px solid #6366f1;' : '';
@@ -305,7 +305,7 @@ window.ClaimView = (function () {
             const isInv = proc === 'Investigation';
             const barColor = isInv ? '#6366f1' : '#FFD000';
             const textColor = isInv ? '#6366f1' : '#1A1446';
-            
+
             processHtml += `
                 <div style="display:flex; align-items:center; gap:10px; font-size:0.9em;">
                     <div style="width:220px; font-weight:600; color:${textColor}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${proc}">${proc}</div>
@@ -325,7 +325,7 @@ window.ClaimView = (function () {
             const isFromInvestigation = step.process === 'Investigation';
             const name = step.activity || 'Unknown';
             const displayName = isFromInvestigation ? `Investigation: ${name}` : name;
-            
+
             if (!activityStats[displayName]) {
                 activityStats[displayName] = { duration: 0, isInvestigation: isFromInvestigation };
             }
@@ -347,7 +347,7 @@ window.ClaimView = (function () {
             const pct = (dur / maxTotalActivityDuration) * 100;
             const barColor = isInv ? '#6366f1' : '#1A1446';
             const textColor = isInv ? '#6366f1' : '#1A1446';
-            
+
             activityHtml += `
                 <div style="display:flex; align-items:center; gap:10px; font-size:0.9em;">
                     <div style="width:220px; font-weight:600; color:${textColor}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${act}">${act}</div>

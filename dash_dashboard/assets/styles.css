@@ -647,7 +647,8 @@ button:hover {
 .view-mode-btn {
     position: absolute;
     top: 20px;
-    right: 160px; /* Position to the left of reset button */
+    right: 160px;
+    /* Position to the left of reset button */
     z-index: 100;
     padding: 8px 16px;
     border-radius: 6px;
