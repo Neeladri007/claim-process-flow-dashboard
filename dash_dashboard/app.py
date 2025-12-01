@@ -22,6 +22,9 @@ DATA_DIR = os.path.join(APP_DIR, "data")
 df = None
 collapsed_df = None
 activity_collapsed_df = None
+aggregated_collapsed_df = None
+
+MAIN_PHASES = ['Coverage', 'Liability', 'Recovery', 'Schedule Services', 'Settlement', 'Total Loss']
 
 def get_latest_csv():
     if not os.path.exists(DATA_DIR):
@@ -67,7 +70,100 @@ def process_dataframe(dataframe):
     activity_collapsed_df['Activity'] = activity_collapsed_df['Activity'].fillna('Unknown')
     activity_collapsed_df['Node_Name'] = activity_collapsed_df['Process'] + " | " + activity_collapsed_df['Activity']
     
+    # Create aggregated dataframe
+    process_aggregated_dataframe(df)
+    
     print(f"Loaded {len(df)} records")
+
+def process_aggregated_dataframe(dataframe):
+    global aggregated_collapsed_df
+    
+    temp_df = dataframe.copy()
+    temp_df = temp_df.sort_values(['Claim_Number', 'First_TimeStamp'])
+    
+    def transform_func(process_series):
+        processes = process_series.tolist()
+        new_processes = []
+        
+        # Find first main phase
+        first_main_idx = -1
+        for i, p in enumerate(processes):
+            if p in MAIN_PHASES:
+                first_main_idx = i
+                break
+        
+        if first_main_idx == -1:
+            return ['Investigation'] * len(processes)
+            
+        # Investigation phase
+        new_processes.extend(['Investigation'] * first_main_idx)
+        
+        # Rest
+        rest_processes = processes[first_main_idx:]
+        
+        # Calculate next mains for rest
+        next_mains = [None] * len(rest_processes)
+        curr_next = None
+        for i in range(len(rest_processes) - 1, -1, -1):
+            if rest_processes[i] in MAIN_PHASES:
+                curr_next = rest_processes[i]
+            next_mains[i] = curr_next
+            
+        last_seen_main = None
+        for i, p in enumerate(rest_processes):
+            if p in MAIN_PHASES:
+                new_processes.append(p)
+                last_seen_main = p
+            else:
+                if next_mains[i] is not None and next_mains[i] != p:
+                    new_processes.append(next_mains[i])
+                else:
+                    new_processes.append(last_seen_main)
+                    
+        return new_processes
+
+    temp_df['Aggregated_Process'] = temp_df.groupby('Claim_Number')['Process'].transform(transform_func)
+    
+    # Collapse aggregated
+    process_changed = (temp_df['Aggregated_Process'] != temp_df['Aggregated_Process'].shift(1))
+    claim_changed = (temp_df['Claim_Number'] != temp_df['Claim_Number'].shift(1))
+    group_key = (process_changed | claim_changed).cumsum()
+    
+    aggregated_collapsed_df = temp_df.groupby(group_key).agg({
+        'Claim_Number': 'first',
+        'Aggregated_Process': 'first',
+        'First_TimeStamp': 'first',
+        'Active_Minutes': 'sum'
+    }).reset_index(drop=True)
+    
+    # Rename for compatibility
+    aggregated_collapsed_df['Process'] = aggregated_collapsed_df['Aggregated_Process']
+    
+    # Add Aggregated_Process to main df for Claim View
+    # We need to map Claim_Number + First_TimeStamp to Aggregated_Process
+    # Since temp_df has the same index/order as df_sorted, we can merge or map
+    
+    # Create a mapping dictionary: (Claim_Number, First_TimeStamp) -> Aggregated_Process
+    # Note: Timestamps might not be unique across different claims, but (Claim, Timestamp) should be unique enough for this dataset
+    # Or better, just merge temp_df[['Claim_Number', 'First_TimeStamp', 'Aggregated_Process']] back to df
+    
+    # Ensure df has the column
+    if df is not None and 'Aggregated_Process' not in df.columns:
+        # We need to be careful about the merge. 
+        # temp_df was sorted. df might not be.
+        # Let's use a temporary key
+        mapping = temp_df.set_index(['Claim_Number', 'First_TimeStamp'])['Aggregated_Process']
+        
+        # We need to ensure df has First_TimeStamp as datetime
+        df['First_TimeStamp'] = pd.to_datetime(df['First_TimeStamp'])
+        
+        # Map values
+        df['Aggregated_Process'] = df.set_index(['Claim_Number', 'First_TimeStamp']).index.map(mapping)
+        
+        # Fill NaN (if any records were dropped in temp_df, though they shouldn't be) with original Process
+        df['Aggregated_Process'] = df['Aggregated_Process'].fillna(df['Process'])
+
+    print("Aggregated dataframe created.")
 
 def load_data():
     csv_path = get_latest_csv()
@@ -86,11 +182,14 @@ load_data()
 
 @server.route('/api/starting-processes')
 def get_starting_processes():
-    if collapsed_df is None:
+    mode = request.args.get('mode', 'detailed')
+    target_df = aggregated_collapsed_df if mode == 'aggregated' else collapsed_df
+    
+    if target_df is None:
         return jsonify({"error": "Data not loaded"}), 500
         
     # Get the first process for each claim
-    starting_processes = collapsed_df.sort_values('First_TimeStamp').groupby('Claim_Number').first().reset_index()
+    starting_processes = target_df.sort_values('First_TimeStamp').groupby('Claim_Number').first().reset_index()
     
     # Count occurrences
     process_counts = starting_processes['Process'].value_counts().reset_index()
@@ -111,10 +210,16 @@ def get_starting_processes():
     max_durations = starting_processes.groupby('Process')['Active_Minutes'].max().round(1).reset_index()
     max_durations.columns = ['process', 'max_duration']
     
+    # Calculate std duration
+    std_durations = starting_processes.groupby('Process')['Active_Minutes'].std().round(1).reset_index()
+    std_durations.columns = ['process', 'std_duration']
+    
     # Merge
     result = pd.merge(process_counts, avg_durations, on='process')
     result = pd.merge(result, median_durations, on='process')
     result = pd.merge(result, max_durations, on='process')
+    result = pd.merge(result, std_durations, on='process')
+    result['std_duration'] = result['std_duration'].fillna(0)
     
     return jsonify({
         "total_claims": total_claims,
@@ -124,17 +229,19 @@ def get_starting_processes():
 @server.route('/api/process-flow/<path:process_name>')
 def get_process_flow(process_name):
     filter_type = request.args.get('filter_type', 'all')
+    mode = request.args.get('mode', 'detailed')
+    target_df = aggregated_collapsed_df if mode == 'aggregated' else collapsed_df
     
-    if collapsed_df is None:
+    if target_df is None:
         return jsonify({"error": "Data not loaded"}), 500
     
     if filter_type == 'starting':
         # Find claims that START with this process
-        starting_claims = collapsed_df.sort_values('First_TimeStamp').groupby('Claim_Number').first()
+        starting_claims = target_df.sort_values('First_TimeStamp').groupby('Claim_Number').first()
         claim_ids = starting_claims[starting_claims['Process'] == process_name].index.tolist()
         
         # Filter main df for these claims
-        filtered_df = collapsed_df[collapsed_df['Claim_Number'].isin(claim_ids)].copy()
+        filtered_df = target_df[target_df['Claim_Number'].isin(claim_ids)].copy()
         
         # We need to find what comes AFTER the first process for these claims
         # Get the sequence for each claim
@@ -167,6 +274,10 @@ def get_process_flow(process_name):
         max_durations = next_steps_df.groupby('Process')['Active_Minutes'].max().round(1).reset_index()
         max_durations.columns = ['process', 'max_duration']
         
+        # Std duration
+        std_durations = next_steps_df.groupby('Process')['Active_Minutes'].std().round(1).reset_index()
+        std_durations.columns = ['process', 'std_duration']
+        
         # Calculate cumulative time stats (time from start to end of this step)
         # We need to calculate cumulative time for each claim up to this step
         # Since we filtered for seq=1, we can just sum the first two steps for these claims
@@ -188,7 +299,7 @@ def get_process_flow(process_name):
         # Calculate remaining steps (avg)
         # For each claim, count total steps and subtract current step index (1)
         # We need the total count for each claim
-        claim_total_steps = collapsed_df[collapsed_df['Claim_Number'].isin(continuing_claims)].groupby('Claim_Number').size().reset_index(name='total_steps')
+        claim_total_steps = target_df[target_df['Claim_Number'].isin(continuing_claims)].groupby('Claim_Number').size().reset_index(name='total_steps')
         
         # Join with next_steps_df
         next_steps_with_total = pd.merge(next_steps_df, claim_total_steps, on='Claim_Number')
@@ -200,10 +311,12 @@ def get_process_flow(process_name):
         result_df = pd.merge(next_step_counts, avg_durations, on='process')
         result_df = pd.merge(result_df, median_durations, on='process')
         result_df = pd.merge(result_df, max_durations, on='process')
+        result_df = pd.merge(result_df, std_durations, on='process')
         result_df = pd.merge(result_df, cum_mean, on='process')
         result_df = pd.merge(result_df, cum_median, on='process')
         result_df = pd.merge(result_df, avg_remaining, on='process', how='left')
         result_df['avg_remaining_steps'] = result_df['avg_remaining_steps'].fillna(0)
+        result_df['std_duration'] = result_df['std_duration'].fillna(0)
         
         return jsonify({
             "source_process": process_name,
@@ -220,18 +333,21 @@ def get_process_flow(process_name):
 @server.route('/api/process-flow-after-path')
 def get_process_flow_after_path():
     path_str = request.args.get('path')
+    mode = request.args.get('mode', 'detailed')
+    target_df = aggregated_collapsed_df if mode == 'aggregated' else collapsed_df
+
     if not path_str:
         return jsonify({"error": "Path required"}), 400
         
     path = path_str.split(',')
     
-    if collapsed_df is None:
+    if target_df is None:
         return jsonify({"error": "Data not loaded"}), 500
         
     # Filter claims that have the first node of the path (optimization)
     first_node = path[0]
-    possible_claims = collapsed_df[collapsed_df['Process'] == first_node]['Claim_Number'].unique()
-    subset_df = collapsed_df[collapsed_df['Claim_Number'].isin(possible_claims)]
+    possible_claims = target_df[target_df['Process'] == first_node]['Claim_Number'].unique()
+    subset_df = target_df[target_df['Claim_Number'].isin(possible_claims)]
     
     # Group sequences
     sequences = subset_df.sort_values(['Claim_Number', 'First_TimeStamp']).groupby('Claim_Number')['Process'].agg(list)
@@ -280,6 +396,10 @@ def get_process_flow_after_path():
         max_durations = target_rows.groupby('Process')['Active_Minutes'].max().round(1).reset_index()
         max_durations.columns = ['process', 'max_duration']
         
+        # Std duration
+        std_durations = target_rows.groupby('Process')['Active_Minutes'].std().round(1).reset_index()
+        std_durations.columns = ['process', 'std_duration']
+        
         # Cumulative time stats
         # Sum active minutes for each claim up to the target row (inclusive)
         # We can filter valid_subset for seq <= len(path)
@@ -298,7 +418,7 @@ def get_process_flow_after_path():
         
         # Remaining steps
         # Get total steps for these claims
-        claim_total_steps = collapsed_df[collapsed_df['Claim_Number'].isin(valid_claims)].groupby('Claim_Number').size().reset_index(name='total_steps')
+        claim_total_steps = target_df[target_df['Claim_Number'].isin(valid_claims)].groupby('Claim_Number').size().reset_index(name='total_steps')
         
         target_with_total = pd.merge(target_rows, claim_total_steps, on='Claim_Number')
         # Current step index is len(path). So steps done is len(path) + 1.
@@ -310,10 +430,12 @@ def get_process_flow_after_path():
         result_df = pd.merge(next_step_counts, avg_durations, on='process')
         result_df = pd.merge(result_df, median_durations, on='process')
         result_df = pd.merge(result_df, max_durations, on='process')
+        result_df = pd.merge(result_df, std_durations, on='process')
         result_df = pd.merge(result_df, cum_mean, on='process')
         result_df = pd.merge(result_df, cum_median, on='process')
         result_df = pd.merge(result_df, avg_remaining, on='process', how='left')
         result_df['avg_remaining_steps'] = result_df['avg_remaining_steps'].fillna(0)
+        result_df['std_duration'] = result_df['std_duration'].fillna(0)
         
         next_steps_data = result_df.to_dict(orient='records')
     else:
@@ -482,13 +604,15 @@ def get_activity_next_steps():
 def get_claims_at_step():
     path_str = request.args.get('path')
     flow_type = request.args.get('type', 'process') # 'process' or 'activity'
+    mode = request.args.get('mode', 'detailed')  # 'detailed' or 'aggregated'
     
     if not path_str:
         return jsonify({"error": "Path required"}), 400
         
     if flow_type == 'process':
         separator = ','
-        data_df = collapsed_df
+        # Use aggregated dataframe if in aggregated mode
+        data_df = aggregated_collapsed_df if mode == 'aggregated' else collapsed_df
         col_name = 'Process'
     else:
         separator = ';;'
@@ -499,39 +623,64 @@ def get_claims_at_step():
     
     if data_df is None:
         return jsonify({"error": "Data not loaded"}), 500
+    
+    # Check if this is a termination path (ends with 'END')
+    is_termination = len(path) > 1 and path[-1] == 'END'
+    
+    if is_termination:
+        # Remove 'END' from path to get the actual process path
+        actual_path = path[:-1]
         
-    # Filter claims that have the first node of the path
-    first_node = path[0]
-    possible_claims = data_df[data_df[col_name] == first_node]['Claim_Number'].unique()
-    subset_df = data_df[data_df['Claim_Number'].isin(possible_claims)]
-    
-    # Group sequences
-    sequences = subset_df.sort_values(['Claim_Number', 'First_TimeStamp']).groupby('Claim_Number')[col_name].agg(list)
-    
-    valid_claims = []
-    
-    for claim_id, seq in sequences.items():
-        # Check if claim followed the exact path
-        if len(seq) >= len(path):
-            if seq[:len(path)] == path:
+        # Filter claims that have the first node
+        first_node = actual_path[0]
+        possible_claims = data_df[data_df[col_name] == first_node]['Claim_Number'].unique()
+        subset_df = data_df[data_df['Claim_Number'].isin(possible_claims)]
+        
+        # Group sequences
+        sequences = subset_df.sort_values(['Claim_Number', 'First_TimeStamp']).groupby('Claim_Number')[col_name].agg(list)
+        
+        valid_claims = []
+        
+        for claim_id, seq in sequences.items():
+            # Check if claim followed the exact path and ENDED there (no more steps)
+            if len(seq) == len(actual_path) and seq == actual_path:
                 valid_claims.append(claim_id)
+    else:
+        # Original logic for non-termination paths
+        first_node = path[0]
+        possible_claims = data_df[data_df[col_name] == first_node]['Claim_Number'].unique()
+        subset_df = data_df[data_df['Claim_Number'].isin(possible_claims)]
+        
+        sequences = subset_df.sort_values(['Claim_Number', 'First_TimeStamp']).groupby('Claim_Number')[col_name].agg(list)
+        
+        valid_claims = []
+        
+        for claim_id, seq in sequences.items():
+            if len(seq) >= len(path):
+                if seq[:len(path)] == path:
+                    valid_claims.append(claim_id)
                 
     if not valid_claims:
         return jsonify({"claims": []})
         
     # Calculate remaining duration for these claims
-    # We need the sum of Active_Minutes for all steps AFTER the current path
-    
     # Get all records for valid claims
     claim_records = data_df[data_df['Claim_Number'].isin(valid_claims)].copy()
     claim_records['seq'] = claim_records.groupby('Claim_Number').cumcount()
     
-    # Filter for steps after the path (index >= len(path))
-    remaining_steps = claim_records[claim_records['seq'] >= len(path)]
-    
-    # Sum remaining duration per claim
-    remaining_durations = remaining_steps.groupby('Claim_Number')['Active_Minutes'].sum().reset_index()
-    remaining_durations.columns = ['Claim_Number', 'remaining_duration']
+    if is_termination:
+        # For terminated claims, there are no remaining steps
+        remaining_durations = pd.DataFrame({
+            'Claim_Number': valid_claims,
+            'remaining_duration': [0.0] * len(valid_claims)
+        })
+    else:
+        # Filter for steps after the path (index >= len(path))
+        remaining_steps = claim_records[claim_records['seq'] >= len(path)]
+        
+        # Sum remaining duration per claim
+        remaining_durations = remaining_steps.groupby('Claim_Number')['Active_Minutes'].sum().reset_index()
+        remaining_durations.columns = ['Claim_Number', 'remaining_duration']
     
     # Get total duration for context
     total_durations = claim_records.groupby('Claim_Number')['Active_Minutes'].sum().reset_index()
@@ -560,6 +709,8 @@ def get_claim_numbers():
 
 @server.route('/api/claim-path/<int:claim_number>')
 def get_claim_path(claim_number):
+    mode = request.args.get('mode', 'detailed')
+    
     if df is None:
         return jsonify({"error": "Data not loaded"}), 500
     
@@ -575,8 +726,13 @@ def get_claim_path(claim_number):
         if pd.isna(activity_val):
             activity_val = "Unknown"
 
+        # Determine process name based on mode
+        process_name = row['Process']
+        if mode == 'aggregated' and 'Aggregated_Process' in row:
+             process_name = row['Aggregated_Process']
+
         path.append({
-            "process": row['Process'],
+            "process": process_name,
             "activity": activity_val,
             "timestamp": row['First_TimeStamp'].isoformat(),
             "active_minutes": float(row['Active_Minutes'])
@@ -669,6 +825,7 @@ def render_content(tab):
                     html.Div([
                         html.Div([html.Div(id='totalSteps', className='summary-value'), html.Div('Total Steps', className='summary-label')], className='summary-item'),
                         html.Div([html.Div(id='totalDuration', className='summary-value'), html.Div('Total Active Time', className='summary-label')], className='summary-item'),
+                        html.Div([html.Div(id='investigationDuration', className='summary-value'), html.Div('Investigation Time', className='summary-label')], className='summary-item', style={'display': 'none'}, id='investigationStat'),
                         html.Div([html.Div(id='startDate', className='summary-value'), html.Div('Start Date', className='summary-label')], className='summary-item'),
                         html.Div([html.Div(id='endDate', className='summary-value'), html.Div('End Date', className='summary-label')], className='summary-item'),
                     ], className='stats-summary', style={'display': 'flex', 'justifyContent': 'space-around', 'marginBottom': '20px', 'padding': '15px', 'background': '#f8f9fa', 'borderRadius': '10px', 'borderLeft': '5px solid #FFD000'}),

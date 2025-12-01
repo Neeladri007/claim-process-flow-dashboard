@@ -11,6 +11,7 @@ window.ProcessFlow = (function () {
     let selectedNodeId = null;
     let initialStatsData = null;
     let sortState = { column: null, direction: 'asc' };
+    let viewMode = 'detailed'; // 'detailed' or 'aggregated'
 
     // Fetch API wrapper
     async function fetchAPI(endpoint) {
@@ -42,7 +43,7 @@ window.ProcessFlow = (function () {
         showLoading();
 
         try {
-            const data = await fetchAPI('/starting-processes');
+            const data = await fetchAPI(`/starting-processes?mode=${viewMode}`);
             allStartingProcesses = data.starting_processes;
             initialStatsData = data; // Store for restoration
 
@@ -56,6 +57,7 @@ window.ProcessFlow = (function () {
                 count: sp.count,
                 percentage: sp.percentage,
                 avgDuration: sp.avg_duration || 0,
+                stdDuration: sp.std_duration || 0,
                 medianDuration: sp.median_duration || 0,
                 maxDuration: sp.max_duration || 0,
                 path: [sp.process],
@@ -111,13 +113,13 @@ window.ProcessFlow = (function () {
             let data;
             if (nodeData.isStarting) {
                 // For starting nodes, use the starting filter
-                const url = `/process-flow/${encodeURIComponent(nodeData.name)}?filter_type=starting`;
+                const url = `/process-flow/${encodeURIComponent(nodeData.name)}?filter_type=starting&mode=${viewMode}`;
                 console.log('API call:', url);
                 data = await fetchAPI(url);
             } else {
                 // For subsequent nodes, use path-based API
                 const pathStr = fullPath.join(',');
-                const url = `/process-flow-after-path?path=${encodeURIComponent(pathStr)}`;
+                const url = `/process-flow-after-path?path=${encodeURIComponent(pathStr)}&mode=${viewMode}`;
                 console.log('API call:', url);
                 data = await fetchAPI(url);
             }
@@ -156,6 +158,7 @@ window.ProcessFlow = (function () {
                         count: step.count,  // This is the actual flow count from this parent
                         percentage: step.percentage,
                         avgDuration: step.avg_duration_minutes || step.avg_duration || 0,
+                        stdDuration: step.std_duration || 0,
                         medianDuration: step.median_duration || 0,
                         maxDuration: step.max_duration || 0,
                         meanCumulativeTime: step.mean_cumulative_time || 0,
@@ -274,6 +277,17 @@ window.ProcessFlow = (function () {
             };
             container.style.position = 'relative';
             container.appendChild(resetBtn);
+        }
+
+        // Add View Mode Toggle if not exists
+        if (!document.getElementById('view-mode-btn')) {
+            const viewBtn = document.createElement('button');
+            viewBtn.id = 'view-mode-btn';
+            viewBtn.className = viewMode === 'detailed' ? 'view-mode-btn detailed' : 'view-mode-btn aggregated';
+            viewBtn.innerHTML = viewMode === 'detailed' ? '👁️ Show Phases' : '🔍 Show Details';
+            viewBtn.style.marginLeft = '10px';
+            viewBtn.onclick = toggleViewMode;
+            container.appendChild(viewBtn);
         }
 
         // Add Controls Guide if not exists
@@ -485,6 +499,7 @@ window.ProcessFlow = (function () {
                 if (d.data.isTermination) classes += ' termination';
                 if (d.data.hasChildren && !d.data.expanded) classes += ' has-children';
                 if (d.data.expanded) classes += ' expanded';
+                if (d.data.name === 'Investigation') classes += ' investigation-node';
                 return classes;
             })
             .call(drag(simulation))
@@ -521,8 +536,14 @@ window.ProcessFlow = (function () {
         // Add circles for non-root nodes
         nodes.filter(d => !d.data.isRoot).append('circle')
             .attr('r', d => d.radius)
-            .attr('fill', '#fff')
-            .attr('stroke', '#667eea')
+            .attr('fill', d => {
+                if (d.data.name === 'Investigation') return '#c7d2fe';
+                return '#fff';
+            })
+            .attr('stroke', d => {
+                if (d.data.name === 'Investigation') return '#6366f1';
+                return '#667eea';
+            })
             .attr('stroke-width', 3);
 
         // Add rectangle for START root node
@@ -649,6 +670,9 @@ window.ProcessFlow = (function () {
             html += `<div style="font-weight: bold; margin-bottom: 3px;">Step Duration:</div>`;
             if (d.data.avgDuration !== undefined) {
                 html += `<div>Avg: ${d.data.avgDuration} min</div>`;
+            }
+            if (d.data.stdDuration !== undefined) {
+                html += `<div>Std Dev: ${d.data.stdDuration} min</div>`;
             }
             if (d.data.medianDuration !== undefined) {
                 html += `<div>Median: ${d.data.medianDuration} min</div>`;
@@ -917,7 +941,7 @@ window.ProcessFlow = (function () {
         pathDisplay.textContent = pathArr.join(' → ');
 
         try {
-            const data = await fetchAPI(`/claims-at-step?path=${encodeURIComponent(pathStr)}&type=process`);
+            const data = await fetchAPI(`/claims-at-step?path=${encodeURIComponent(pathStr)}&type=process&mode=${viewMode}`);
             currentClaimsData = data.claims || [];
 
             // Reset sort state
@@ -979,12 +1003,24 @@ window.ProcessFlow = (function () {
         closeModal();
     }
 
+    function toggleViewMode() {
+        viewMode = viewMode === 'detailed' ? 'aggregated' : 'detailed';
+        const btn = document.getElementById('view-mode-btn');
+        if (btn) {
+            btn.innerHTML = viewMode === 'detailed' ? '👁️ Show Phases' : '🔍 Show Details';
+            btn.className = viewMode === 'detailed' ? 'view-mode-btn detailed' : 'view-mode-btn aggregated';
+        }
+        // Force reload
+        loadAllStartingProcesses(true);
+    }
+
     return {
         init: loadAllStartingProcesses,
         openClaimsModal: openClaimsModal,
         closeModal: closeModal,
         viewClaim: viewClaim,
-        sortClaims: sortClaims
+        sortClaims: sortClaims,
+        toggleViewMode: toggleViewMode
     };
 
 })();

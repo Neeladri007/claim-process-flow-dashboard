@@ -177,9 +177,13 @@ select:focus {
     background-color: #fafbfc;
 }
 
+.node.investigation-node circle {
+    fill: #c7d2fe !important;
+    stroke: #6366f1 !important;
+}
+
 .node circle {
-    fill: #fff;
-    stroke: #1A1446;
+    /* fill and stroke are set in JS to allow data-driven styling */
     stroke-width: 3px;
     cursor: pointer;
     transition: all 0.3s;
@@ -637,6 +641,40 @@ button:hover {
 .reset-btn:hover {
     background: #1A1446;
     color: #FFD000;
+}
+
+/* View Mode Button */
+.view-mode-btn {
+    position: absolute;
+    top: 20px;
+    right: 160px; /* Position to the left of reset button */
+    z-index: 100;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    transition: all 0.2s;
+}
+
+.view-mode-btn.detailed {
+    background: white;
+    border: 2px solid #1A1446;
+    color: #1A1446;
+}
+
+.view-mode-btn.detailed:hover {
+    background: #f0f4ff;
+}
+
+.view-mode-btn.aggregated {
+    background: #1A1446;
+    border: 2px solid #1A1446;
+    color: #FFD000;
+}
+
+.view-mode-btn.aggregated:hover {
+    background: #2a2266;
 }
 
 /* Controls Guide */
