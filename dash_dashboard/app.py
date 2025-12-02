@@ -92,15 +92,32 @@ def process_aggregated_dataframe(dataframe):
                 first_main_idx = i
                 break
         
-        # If no main phases found, label everything as Investigation
+        # Scenario B: If no main phases found, label everything as Investigation
         if first_main_idx == -1:
             return ['Investigation'] * len(processes)
             
-        # Only label the initial steps before first main phase as Investigation
-        new_processes.extend(['Investigation'] * first_main_idx)
-        
-        # After first main phase, keep everything as is
-        new_processes.extend(processes[first_main_idx:])
+        # Scenario A: Label the initial steps before first main phase as Investigation
+        for i in range(len(processes)):
+            if i < first_main_idx:
+                new_processes.append('Investigation')
+            else:
+                current_p = processes[i]
+                if current_p in MAIN_PHASES:
+                    new_processes.append(current_p)
+                else:
+                    # Scenario C: Interstitial Activities -> Merged into Next Main Phase
+                    # Look ahead for the next main phase
+                    next_main = None
+                    for j in range(i + 1, len(processes)):
+                        if processes[j] in MAIN_PHASES:
+                            next_main = processes[j]
+                            break
+                    
+                    if next_main:
+                        new_processes.append(next_main)
+                    else:
+                        # If no next main phase, keep original
+                        new_processes.append(current_p)
                     
         return new_processes
 
@@ -122,27 +139,17 @@ def process_aggregated_dataframe(dataframe):
     aggregated_collapsed_df['Process'] = aggregated_collapsed_df['Aggregated_Process']
     
     # Add Aggregated_Process to main df for Claim View
-    # We need to map Claim_Number + First_TimeStamp to Aggregated_Process
-    # Since temp_df has the same index/order as df_sorted, we can merge or map
-    
-    # Create a mapping dictionary: (Claim_Number, First_TimeStamp) -> Aggregated_Process
-    # Note: Timestamps might not be unique across different claims, but (Claim, Timestamp) should be unique enough for this dataset
-    # Or better, just merge temp_df[['Claim_Number', 'First_TimeStamp', 'Aggregated_Process']] back to df
-    
-    # Ensure df has the column
-    if df is not None and 'Aggregated_Process' not in df.columns:
-        # We need to be careful about the merge. 
-        # temp_df was sorted. df might not be.
-        # Let's use a temporary key
+    if df is not None:
+        # Create mapping
         mapping = temp_df.set_index(['Claim_Number', 'First_TimeStamp'])['Aggregated_Process']
         
-        # We need to ensure df has First_TimeStamp as datetime
+        # Ensure df has First_TimeStamp as datetime
         df['First_TimeStamp'] = pd.to_datetime(df['First_TimeStamp'])
         
         # Map values
         df['Aggregated_Process'] = df.set_index(['Claim_Number', 'First_TimeStamp']).index.map(mapping)
         
-        # Fill NaN (if any records were dropped in temp_df, though they shouldn't be) with original Process
+        # Fill NaN
         df['Aggregated_Process'] = df['Aggregated_Process'].fillna(df['Process'])
 
     print("Aggregated dataframe created.")
