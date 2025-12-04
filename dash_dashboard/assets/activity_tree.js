@@ -69,6 +69,7 @@ window.ActivityFlow = (function () {
                         node_name: node.node_name, // Internal name
                         count: node.count,
                         percentage: node.percentage,
+                        percentageOfTotal: node.percentage_of_total,
                         avgDuration: node.avg_duration_minutes,
                         medianDuration: node.median_duration,
                         maxDuration: node.max_duration,
@@ -80,6 +81,7 @@ window.ActivityFlow = (function () {
                             node_name: c.node_name,
                             count: c.count,
                             percentage: c.percentage,
+                            percentageOfTotal: c.percentage_of_total,
                             avgDuration: c.avg_duration_minutes,
                             medianDuration: c.median_duration,
                             maxDuration: c.max_duration,
@@ -100,6 +102,7 @@ window.ActivityFlow = (function () {
                         node_name: node.node_name,
                         count: node.count,
                         percentage: node.percentage,
+                        percentageOfTotal: node.percentage_of_total,
                         avgDuration: node.avg_duration_minutes,
                         medianDuration: node.median_duration,
                         maxDuration: node.max_duration,
@@ -213,6 +216,7 @@ window.ActivityFlow = (function () {
                             node_name: step.node_name,
                             count: step.count,
                             percentage: step.percentage,
+                            percentageOfTotal: step.percentage_of_total,
                             avgDuration: step.avg_duration_minutes,
                             medianDuration: step.median_duration,
                             maxDuration: step.max_duration,
@@ -226,6 +230,7 @@ window.ActivityFlow = (function () {
                                 name: c.node_name.split(' | ')[1] || c.node_name,
                                 count: c.count,
                                 percentage: c.percentage,
+                                percentageOfTotal: c.percentage_of_total,
                                 avgDuration: c.avg_duration_minutes,
                                 medianDuration: c.median_duration,
                                 maxDuration: c.max_duration,
@@ -246,6 +251,7 @@ window.ActivityFlow = (function () {
                             node_name: step.node_name,
                             count: step.count,
                             percentage: step.percentage,
+                            percentageOfTotal: step.percentage_of_total,
                             avgDuration: step.avg_duration_minutes,
                             medianDuration: step.median_duration,
                             maxDuration: step.max_duration,
@@ -710,6 +716,9 @@ window.ActivityFlow = (function () {
         html += `<div>Claims: ${d.data.count}</div>`;
         if (d.data.percentage && !d.data.isRoot) {
             html += `<div>Percentage: ${d.data.percentage}%</div>`;
+            if (d.data.percentageOfTotal) {
+                html += `<div>% of Total Claims: ${d.data.percentageOfTotal}%</div>`;
+            }
         }
 
         if (!d.data.isRoot && !d.data.isTermination && !d.data.isGroup) {

@@ -11,8 +11,14 @@ import io
 # Initialize Flask server
 server = Flask(__name__)
 
+# External scripts for D3.js and d3-sankey
+external_scripts = [
+    'https://d3js.org/d3.v7.min.js',
+    'https://cdn.jsdelivr.net/npm/d3-sankey@0.12.3/dist/d3-sankey.min.js'
+]
+
 # Initialize Dash app
-app = dash.Dash(__name__, server=server, title="WEA Claim Process Flow", suppress_callback_exceptions=True)
+app = dash.Dash(__name__, server=server, title="WEA Claim Process Flow", suppress_callback_exceptions=True, external_scripts=external_scripts)
 
 # Load Data
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -23,6 +29,8 @@ df = None
 collapsed_df = None
 activity_collapsed_df = None
 aggregated_collapsed_df = None
+current_data_file = None
+data_summary = {}
 
 MAIN_PHASES = ['Coverage', 'Liability', 'Recovery', 'Schedule Services', 'Settlement', 'Total Loss']
 
@@ -38,9 +46,19 @@ def get_latest_csv():
     return latest_file
 
 def process_dataframe(dataframe):
-    global df, collapsed_df, activity_collapsed_df
+    global df, collapsed_df, activity_collapsed_df, data_summary
     df = dataframe
+    
+    # Convert Claim_Number to string to preserve leading zeros
+    df['Claim_Number'] = df['Claim_Number'].astype(str)
     df['First_TimeStamp'] = pd.to_datetime(df['First_TimeStamp'])
+    
+    # Calculate summary statistics
+    data_summary = {
+        'total_claims': len(df['Claim_Number'].unique()),
+        'min_timestamp': df['First_TimeStamp'].min().strftime('%Y-%m-%d'),
+        'max_timestamp': df['First_TimeStamp'].max().strftime('%Y-%m-%d')
+    }
     
     # Create collapsed dataframe for process flow analysis
     df_sorted = df.sort_values(['Claim_Number', 'First_TimeStamp'])
@@ -154,16 +172,26 @@ def process_aggregated_dataframe(dataframe):
 
     print("Aggregated dataframe created.")
 
-def load_data():
-    csv_path = get_latest_csv()
+def load_data(filename=None):
+    global current_data_file
+    
+    if filename:
+        csv_path = os.path.join(DATA_DIR, filename)
+        if not os.path.exists(csv_path):
+            print(f"File not found: {csv_path}")
+            return False
+    else:
+        csv_path = get_latest_csv()
     
     if not csv_path:
         print(f"No CSV file found in: {DATA_DIR}")
-        return
+        return False
 
     print(f"Loading data from {csv_path}...")
-    temp_df = pd.read_csv(csv_path)
+    temp_df = pd.read_csv(csv_path, dtype={'Claim_Number': str})
     process_dataframe(temp_df)
+    current_data_file = os.path.basename(csv_path)
+    return True
 
 load_data()
 
@@ -176,6 +204,9 @@ def get_starting_processes():
     
     if target_df is None:
         return jsonify({"error": "Data not loaded"}), 500
+    
+    # Get total claims for percentage calculations
+    total_claims_count = len(target_df['Claim_Number'].unique())
         
     # Get the first process for each claim
     starting_processes = target_df.sort_values('First_TimeStamp').groupby('Claim_Number').first().reset_index()
@@ -186,6 +217,7 @@ def get_starting_processes():
     
     total_claims = len(starting_processes)
     process_counts['percentage'] = (process_counts['count'] / total_claims * 100).round(1)
+    process_counts['percentage_of_total'] = (process_counts['count'] / total_claims_count * 100).round(1)
     
     # Calculate average duration (Active_Minutes)
     avg_durations = starting_processes.groupby('Process')['Active_Minutes'].mean().round(1).reset_index()
@@ -248,8 +280,10 @@ def get_process_flow(process_name):
         terminations = len(claim_ids) - len(continuing_claims)
         
         total_flow = len(claim_ids)
+        total_claims_in_data = len(target_df['Claim_Number'].unique())
         
         next_step_counts['percentage'] = (next_step_counts['count'] / total_flow * 100).round(1)
+        next_step_counts['percentage_of_total'] = (next_step_counts['count'] / total_claims_in_data * 100).round(1)
         
         # Avg duration of the NEXT step
         avg_durations = next_steps_df.groupby('Process')['Active_Minutes'].mean().round(1).reset_index()
@@ -369,6 +403,10 @@ def get_process_flow_after_path():
         next_step_counts.columns = ['process', 'count']
         next_step_counts['percentage'] = (next_step_counts['count'] / total_flow * 100).round(1)
         
+        # Add percentage of total claims
+        total_claims_in_data = len(target_df['Claim_Number'].unique())
+        next_step_counts['percentage_of_total'] = (next_step_counts['count'] / total_claims_in_data * 100).round(1)
+        
         # Calculate avg duration for next steps
         valid_subset = subset_df[subset_df['Claim_Number'].isin(valid_claims)].copy()
         valid_subset['seq'] = valid_subset.groupby('Claim_Number').cumcount()
@@ -454,6 +492,7 @@ def get_activity_starting_nodes():
     
     total_claims = len(starting_nodes)
     node_counts['percentage'] = (node_counts['count'] / total_claims * 100).round(1)
+    node_counts['percentage_of_total'] = (node_counts['count'] / total_claims * 100).round(1)
     
     # Avg duration
     avg_durations = starting_nodes.groupby('Node_Name')['Active_Minutes'].mean().round(1).reset_index()
@@ -528,6 +567,10 @@ def get_activity_next_steps():
     if not next_step_counts.empty:
         next_step_counts.columns = ['node_name', 'count']
         next_step_counts['percentage'] = (next_step_counts['count'] / total_flow * 100).round(1)
+        
+        # Add percentage of total claims
+        total_claims_in_data = len(activity_collapsed_df['Claim_Number'].unique())
+        next_step_counts['percentage_of_total'] = (next_step_counts['count'] / total_claims_in_data * 100).round(1)
         
         # Avg duration
         valid_subset = subset_df[subset_df['Claim_Number'].isin(valid_claims)].copy()
@@ -688,6 +731,57 @@ def get_claims_at_step():
         "claims": result.to_dict(orient='records')
     })
 
+@server.route('/api/data-files')
+def get_data_files():
+    if not os.path.exists(DATA_DIR):
+        return jsonify({"files": []})
+    
+    files = [f for f in os.listdir(DATA_DIR) if f.endswith('.csv')]
+    
+    # Create friendly labels for each file
+    file_options = []
+    for idx, filename in enumerate(files, 1):
+        # Try to load metadata for each file
+        try:
+            temp_path = os.path.join(DATA_DIR, filename)
+            temp_df = pd.read_csv(temp_path, dtype={'Claim_Number': str})
+            temp_df['First_TimeStamp'] = pd.to_datetime(temp_df['First_TimeStamp'])
+            
+            total_claims = len(temp_df['Claim_Number'].unique())
+            min_date = temp_df['First_TimeStamp'].min().strftime('%b %d, %Y')
+            max_date = temp_df['First_TimeStamp'].max().strftime('%b %d, %Y')
+            
+            label = f"Study {idx} • {total_claims} Claims • {min_date} to {max_date}"
+            file_options.append({"label": label, "value": filename})
+        except:
+            # Fallback to filename if metadata can't be loaded
+            file_options.append({"label": f"Study {idx} ({filename})", "value": filename})
+    
+    return jsonify({
+        "files": file_options,
+        "current_file": current_data_file,
+        "summary": data_summary
+    })
+
+@server.route('/api/load-data-file', methods=['POST'])
+def load_data_file():
+    data = request.get_json()
+    filename = data.get('filename')
+    
+    if not filename:
+        return jsonify({"error": "Filename required"}), 400
+    
+    success = load_data(filename)
+    
+    if success:
+        return jsonify({
+            "success": True,
+            "current_file": current_data_file,
+            "summary": data_summary
+        })
+    else:
+        return jsonify({"error": "Failed to load data file"}), 500
+
 @server.route('/api/claim-numbers')
 def get_claim_numbers():
     if df is None:
@@ -696,14 +790,16 @@ def get_claim_numbers():
     claim_numbers = sorted(df['Claim_Number'].unique().tolist())
     return jsonify({"claim_numbers": claim_numbers})
 
-@server.route('/api/claim-path/<int:claim_number>')
+@server.route('/api/claim-path/<claim_number>')
 def get_claim_path(claim_number):
     mode = request.args.get('mode', 'detailed')
     
     if df is None:
         return jsonify({"error": "Data not loaded"}), 500
     
-    claim_data = df[df['Claim_Number'] == claim_number].sort_values('First_TimeStamp')
+    # Convert to string to match dtype
+    claim_number_str = str(claim_number)
+    claim_data = df[df['Claim_Number'] == claim_number_str].sort_values('First_TimeStamp')
     
     if claim_data.empty:
         return jsonify({"error": "Claim not found"}), 404
@@ -736,11 +832,38 @@ def get_claim_path(claim_number):
 # --- Layout & Callbacks ---
 
 app.layout = html.Div([
+    dcc.Store(id='data-change-trigger', data=0),
     dcc.Location(id='url', refresh=False),
     dcc.Location(id='url-refresh', refresh=True),
     html.Div([
-        html.H1("WEA Claim Process Flow Dashboard", style={'textAlign': 'center', 'color': '#1A1446'}),
-    ], className='header'),
+        html.Div([
+            html.H1("WEA Claim Process Flow Dashboard", style={'textAlign': 'center', 'color': '#1A1446', 'margin': 0}),
+        ], style={'flex': 1}),
+        html.Div([
+            html.Label("Data Source:", style={
+                'marginRight': '10px', 
+                'fontWeight': '600', 
+                'color': '#1A1446',
+                'fontSize': '14px'
+            }),
+            dcc.Dropdown(
+                id='data-file-selector',
+                style={
+                    'width': '450px', 
+                    'display': 'inline-block',
+                    'fontSize': '13px'
+                },
+                clearable=False
+            ),
+        ], style={
+            'display': 'flex', 
+            'alignItems': 'center',
+            'backgroundColor': '#f8f9fa',
+            'padding': '12px 16px',
+            'borderRadius': '8px',
+            'border': '1px solid #e0e0e0'
+        })
+    ], className='header', style={'display': 'flex', 'justifyContent': 'space-between', 'alignItems': 'center', 'padding': '15px 0'}),
     
     dcc.Tabs(id="tabs", value='process-flow', children=[
         dcc.Tab(label='Process Flow', value='process-flow', 
@@ -765,6 +888,60 @@ def set_tab(search):
     if search and 'claim=' in search:
         return 'claim-view'
     return dash.no_update
+
+@app.callback(
+    [Output('data-file-selector', 'options'),
+     Output('data-file-selector', 'value')],
+    [Input('url', 'pathname')],
+    prevent_initial_call=False
+)
+def initialize_data_selector(_):
+    """Initialize the data file selector with available files"""
+    if not os.path.exists(DATA_DIR):
+        return [], None
+    
+    files = [f for f in os.listdir(DATA_DIR) if f.endswith('.csv')]
+    
+    # Create friendly labels for each file
+    options = []
+    for idx, filename in enumerate(files, 1):
+        try:
+            temp_path = os.path.join(DATA_DIR, filename)
+            temp_df = pd.read_csv(temp_path, dtype={'Claim_Number': str})
+            temp_df['First_TimeStamp'] = pd.to_datetime(temp_df['First_TimeStamp'])
+            
+            total_claims = len(temp_df['Claim_Number'].unique())
+            min_date = temp_df['First_TimeStamp'].min().strftime('%b %d, %Y')
+            max_date = temp_df['First_TimeStamp'].max().strftime('%b %d, %Y')
+            
+            label = f"Study {idx} • {total_claims} Claims • {min_date} to {max_date}"
+            options.append({'label': label, 'value': filename})
+        except:
+            options.append({'label': f"Study {idx} ({filename})", 'value': filename})
+    
+    if current_data_file:
+        return options, current_data_file
+    
+    return options, files[0] if files else None
+
+@app.callback(
+    Output('data-change-trigger', 'data'),
+    [Input('data-file-selector', 'value')],
+    [State('data-change-trigger', 'data')],
+    prevent_initial_call=True
+)
+def load_selected_data(filename, current_trigger):
+    """Load the selected data file"""
+    if not filename:
+        return current_trigger
+    
+    success = load_data(filename)
+    
+    if success:
+        # Increment trigger to force refresh
+        return (current_trigger or 0) + 1
+    
+    return current_trigger
 
 @app.callback(Output('tabs-content', 'children'), Input('tabs', 'value'))
 def render_content(tab):
@@ -886,6 +1063,30 @@ clientside_callback(
     """,
     Output('tabs-content', 'id'),
     Input('tabs', 'value')
+)
+
+# Clientside callback to refresh current tab when data changes
+clientside_callback(
+    """
+    function(trigger, tab) {
+        if (trigger > 0) {
+            setTimeout(function() {
+                console.log("Data changed, refreshing", tab);
+                if (tab === 'process-flow' && window.ProcessFlow) {
+                    window.ProcessFlow.init(true);
+                } else if (tab === 'activity-flow' && window.ActivityFlow) {
+                    window.ActivityFlow.init(true);
+                } else if (tab === 'claim-view' && window.ClaimView) {
+                    window.ClaimView.init();
+                }
+            }, 500);
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('data-change-trigger', 'id'),
+    Input('data-change-trigger', 'data'),
+    State('tabs', 'value')
 )
 
 def parse_contents(contents, filename):

@@ -114,6 +114,266 @@ window.ClaimView = (function () {
         }
     }
 
+    function renderPhaseFlowDiagram(path) {
+        const container = document.getElementById('process-analysis');
+        if (!container) {
+            console.error('Container process-analysis not found');
+            return;
+        }
+
+        console.log('Rendering phase flow diagram with', path.length, 'steps');
+
+        // Calculate process occurrences and transitions
+        const processCount = {};
+        const transitions = {};
+
+        path.forEach((step, idx) => {
+            const process = step.process;
+            
+            // Count occurrences
+            processCount[process] = (processCount[process] || 0) + 1;
+
+            // Count transitions to next process (excluding consecutive duplicates)
+            if (idx < path.length - 1) {
+                const nextProcess = path[idx + 1].process;
+                if (process !== nextProcess) {
+                    const key = `${process}→${nextProcess}`;
+                    transitions[key] = (transitions[key] || 0) + 1;
+                }
+            }
+        });
+
+        console.log('Process counts:', processCount);
+        console.log('Transitions:', transitions);
+
+        // Prepare data
+        const processes = Object.keys(processCount);
+        if (processes.length === 0) {
+            container.innerHTML = '<h4 style="color:#666; margin-bottom:15px;">Phase Flow Diagram</h4><p style="color:#999;">No phase data to display.</p>';
+            return;
+        }
+
+        // Create circular layout
+        const width = container.offsetWidth || 600;
+        const height = Math.max(500, width * 0.75); // Dynamic height based on width
+        const radius = Math.min(width, height) / 2 - 80; // Increased padding (was 60)
+        
+        container.innerHTML = '<h4 style="color:#666; margin-bottom:15px; font-size: 14px;">Phase Flow Diagram</h4>';
+        
+        const svg = d3.select(container)
+            .append('svg')
+            .attr('width', '100%')
+            .attr('height', height)
+            .attr('viewBox', `0 0 ${width} ${height}`)
+            .attr('preserveAspectRatio', 'xMidYMid meet')
+            .style('background', 'linear-gradient(135deg, #f8f9fc 0%, #ffffff 100%)')
+            .style('border-radius', '12px')
+            .style('box-shadow', '0 4px 12px rgba(26, 20, 70, 0.08)');
+
+        const defs = svg.append('defs');
+
+        const g = svg.append('g')
+            .attr('transform', `translate(${width/2},${height/2})`);
+
+        // Add gradients for nodes
+        const gradientGold = defs.append('linearGradient')
+            .attr('id', 'gradient-gold')
+            .attr('x1', '0%')
+            .attr('y1', '0%')
+            .attr('x2', '0%')
+            .attr('y2', '100%');
+        gradientGold.append('stop')
+            .attr('offset', '0%')
+            .style('stop-color', '#FFE566')
+            .style('stop-opacity', 1);
+        gradientGold.append('stop')
+            .attr('offset', '100%')
+            .style('stop-color', '#FFD000')
+            .style('stop-opacity', 1);
+
+        const gradientIndigo = defs.append('linearGradient')
+            .attr('id', 'gradient-indigo')
+            .attr('x1', '0%')
+            .attr('y1', '0%')
+            .attr('x2', '0%')
+            .attr('y2', '100%');
+        gradientIndigo.append('stop')
+            .attr('offset', '0%')
+            .style('stop-color', '#818cf8')
+            .style('stop-opacity', 1);
+        gradientIndigo.append('stop')
+            .attr('offset', '100%')
+            .style('stop-color', '#6366f1')
+            .style('stop-opacity', 1);
+
+        // Add arrow markers
+        ['gray'].forEach(color => {
+            defs.append('marker')
+                .attr('id', `arrow-${color}`)
+                .attr('viewBox', '0 -5 10 10')
+                .attr('refX', 9)
+                .attr('refY', 0)
+                .attr('markerWidth', 8)
+                .attr('markerHeight', 8)
+                .attr('orient', 'auto')
+                .append('path')
+                .attr('d', 'M0,-5L10,0L0,5')
+                .style('fill', '#64748b')
+                .style('opacity', 0.6);
+        });
+
+        // Calculate angles for each process
+        const angleStep = (2 * Math.PI) / processes.length;
+        const processPositions = {};
+        
+        processes.forEach((proc, i) => {
+            const angle = i * angleStep - Math.PI / 2; // Start from top
+            processPositions[proc] = {
+                angle: angle,
+                x: Math.cos(angle) * radius,
+                y: Math.sin(angle) * radius,
+                count: processCount[proc],
+                isInvestigation: proc === 'Investigation'
+            };
+        });
+
+        // Draw links (curved paths between nodes) with neutral color
+        Object.entries(transitions).forEach(([key, value]) => {
+            const [source, target] = key.split('→');
+            if (!processPositions[source] || !processPositions[target]) return;
+            
+            const sourcePos = processPositions[source];
+            const targetPos = processPositions[target];
+            const linkColor = '#64748b'; // Neutral slate gray
+            
+            // Create curved path with arrows
+            g.append('path')
+                .datum({ source, target, value })
+                .attr('d', () => {
+                    const dx = targetPos.x - sourcePos.x;
+                    const dy = targetPos.y - sourcePos.y;
+                    const dr = Math.sqrt(dx * dx + dy * dy) * 0.9;
+                    return `M${sourcePos.x},${sourcePos.y}A${dr},${dr} 0 0,1 ${targetPos.x},${targetPos.y}`;
+                })
+                .style('fill', 'none')
+                .style('stroke', linkColor)
+                .style('stroke-width', Math.max(2, Math.sqrt(value) * 2))
+                .style('opacity', 0.3)
+                .style('stroke-linecap', 'round')
+                .attr('marker-end', 'url(#arrow-gray)')
+                .attr('class', 'flow-link')
+                .on('mouseover', function(event, d) {
+                    d3.select(this)
+                        .style('opacity', 0.7)
+                        .style('stroke-width', Math.max(4, Math.sqrt(d.value) * 3));
+                    
+                    const tooltip = d3.select('body').append('div')
+                        .attr('class', 'flow-tooltip')
+                        .style('position', 'absolute')
+                        .style('background', '#1A1446')
+                        .style('color', 'white')
+                        .style('padding', '8px 12px')
+                        .style('border-radius', '6px')
+                        .style('font-size', '12px')
+                        .style('pointer-events', 'none')
+                        .style('z-index', '1000')
+                        .style('box-shadow', '0 2px 8px rgba(0,0,0,0.15)')
+                        .html(`${d.source} → ${d.target}<br/>Transitions: <strong>${d.value}</strong>`)
+                        .style('left', (event.pageX + 10) + 'px')
+                        .style('top', (event.pageY - 10) + 'px');
+                })
+                .on('mouseout', function(event, d) {
+                    d3.select(this)
+                        .style('opacity', 0.3)
+                        .style('stroke-width', Math.max(2, Math.sqrt(d.value) * 2));
+                    d3.selectAll('.flow-tooltip').remove();
+                });
+        });
+
+        // Draw nodes
+        const nodeGroups = g.selectAll('.process-node')
+            .data(processes)
+            .enter()
+            .append('g')
+            .attr('class', 'process-node')
+            .attr('transform', d => `translate(${processPositions[d].x},${processPositions[d].y})`);
+
+        // Node circles with size based on count (increased size)
+        const maxCount = Math.max(...Object.values(processCount));
+        
+        // Add subtle glow effect
+        nodeGroups.append('circle')
+            .attr('r', d => 22 + (processCount[d] / maxCount) * 26)
+            .style('fill', d => processPositions[d].isInvestigation ? 'rgba(99, 102, 241, 0.08)' : 'rgba(255, 208, 0, 0.08)')
+            .style('stroke', 'none');
+        
+        nodeGroups.append('circle')
+            .attr('r', d => 20 + (processCount[d] / maxCount) * 24)
+            .style('fill', d => processPositions[d].isInvestigation ? 'url(#gradient-indigo)' : 'url(#gradient-gold)')
+            .style('stroke', 'none')
+            .style('cursor', 'pointer')
+            .style('opacity', 0.6)
+            .style('filter', 'drop-shadow(0 1px 3px rgba(0,0,0,0.15))')
+            .on('mouseover', function(event, d) {
+                d3.select(this)
+                    .transition()
+                    .duration(200)
+                    .attr('r', 24 + (processCount[d] / maxCount) * 28)
+                    .style('opacity', 0.9)
+                    .style('filter', 'drop-shadow(0 2px 6px rgba(0,0,0,0.25))');
+                
+                const tooltip = d3.select('body').append('div')
+                    .attr('class', 'flow-tooltip')
+                    .style('position', 'absolute')
+                    .style('background', '#1A1446')
+                    .style('color', 'white')
+                    .style('padding', '8px 12px')
+                    .style('border-radius', '6px')
+                    .style('font-size', '12px')
+                    .style('pointer-events', 'none')
+                    .style('z-index', '1000')
+                    .style('box-shadow', '0 2px 8px rgba(0,0,0,0.15)')
+                    .html(`${d}<br/>Occurrences: <strong>${processCount[d]}</strong>`)
+                    .style('left', (event.pageX + 10) + 'px')
+                    .style('top', (event.pageY - 10) + 'px');
+            })
+            .on('mouseout', function(event, d) {
+                d3.select(this)
+                    .transition()
+                    .duration(200)
+                    .attr('r', 20 + (processCount[d] / maxCount) * 24)
+                    .style('opacity', 0.6)
+                    .style('filter', 'drop-shadow(0 1px 3px rgba(0,0,0,0.15))');
+                d3.selectAll('.flow-tooltip').remove();
+            });
+
+        // Node labels
+        nodeGroups.append('text')
+            .attr('dy', d => {
+                const pos = processPositions[d];
+                return pos.y < 0 ? -30 - (processCount[d] / maxCount) * 26 : 35 + (processCount[d] / maxCount) * 26;
+            })
+            .attr('text-anchor', 'middle')
+            .style('font-size', '13px')
+            .style('font-weight', '500')
+            .style('fill', d => processPositions[d].isInvestigation ? '#6366f1' : '#1A1446')
+            .style('pointer-events', 'none')
+            .text(d => d);
+
+        // Count labels inside circles
+        nodeGroups.append('text')
+            .attr('text-anchor', 'middle')
+            .attr('dy', '0.35em')
+            .style('font-size', '13px')
+            .style('font-weight', '600')
+            .style('fill', 'white')
+            .style('text-shadow', '0 1px 2px rgba(0,0,0,0.4)')
+            .style('pointer-events', 'none')
+            .text(d => processCount[d]);
+
+        console.log('Phase flow diagram rendered successfully');
+    }
+
     function displayResults(data) {
         const resultsArea = document.getElementById('resultsArea');
         const timeline = document.getElementById('timeline');
@@ -283,6 +543,9 @@ window.ClaimView = (function () {
 
         // --- Right Side Analysis ---
 
+        // 0. Phase Flow Diagram
+        renderPhaseFlowDiagram(data.path);
+
         // 1. Process Level Aggregation
         const processStats = {};
         data.path.forEach(step => {
@@ -297,7 +560,7 @@ window.ClaimView = (function () {
 
         const maxTotalProcessDuration = sortedProcesses.length > 0 ? sortedProcesses[0][1] : 1;
 
-        let processHtml = '<h4 style="color:#666; margin-bottom:10px;">Total Duration by Phase</h4>';
+        let processHtml = '<h4 style="color:#666; margin-bottom:10px; margin-top:20px;">Total Duration by Phase</h4>';
         processHtml += '<div style="display:flex; flex-direction:column; gap:10px;">';
 
         sortedProcesses.forEach(([proc, dur]) => {
@@ -317,7 +580,13 @@ window.ClaimView = (function () {
             `;
         });
         processHtml += '</div>';
-        if (processAnalysis) processAnalysis.innerHTML = processHtml;
+        
+        // Append to existing content (don't overwrite the phase flow diagram)
+        if (processAnalysis) {
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = processHtml;
+            processAnalysis.appendChild(tempDiv);
+        }
 
         // 2. Activity Level Aggregation
         const activityStats = {};

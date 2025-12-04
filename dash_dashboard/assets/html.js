@@ -56,6 +56,7 @@ window.ProcessFlow = (function () {
                 name: sp.process,
                 count: sp.count,
                 percentage: sp.percentage,
+                percentageOfTotal: sp.percentage_of_total,
                 avgDuration: sp.avg_duration || 0,
                 stdDuration: sp.std_duration || 0,
                 medianDuration: sp.median_duration || 0,
@@ -157,6 +158,7 @@ window.ProcessFlow = (function () {
                         name: step.process,
                         count: step.count,  // This is the actual flow count from this parent
                         percentage: step.percentage,
+                        percentageOfTotal: step.percentage_of_total,
                         avgDuration: step.avg_duration_minutes || step.avg_duration || 0,
                         stdDuration: step.std_duration || 0,
                         medianDuration: step.median_duration || 0,
@@ -663,6 +665,9 @@ window.ProcessFlow = (function () {
         html += `<div>Claims: ${d.data.count}</div>`;
         if (d.data.percentage && !d.data.isRoot) {
             html += `<div>Percentage: ${d.data.percentage}%</div>`;
+            if (d.data.percentageOfTotal) {
+                html += `<div>% of Total Claims: ${d.data.percentageOfTotal}%</div>`;
+            }
         }
 
         if (!d.data.isRoot && !d.data.isTermination) {
