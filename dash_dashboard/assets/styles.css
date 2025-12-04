@@ -64,7 +64,7 @@ label {
     box-shadow: 0 4px 8px rgba(26, 20, 70, 0.1) !important;
 }
 
-.Select.is-focused:not(.is-open) > .Select-control {
+.Select.is-focused:not(.is-open)>.Select-control {
     border-color: #1A1446 !important;
     box-shadow: 0 0 0 3px rgba(26, 20, 70, 0.1) !important;
 }

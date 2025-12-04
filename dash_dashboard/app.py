@@ -94,7 +94,7 @@ def process_dataframe(dataframe):
     print(f"Loaded {len(df)} records")
 
 def process_aggregated_dataframe(dataframe):
-    global aggregated_collapsed_df
+    global aggregated_collapsed_df, df
     
     temp_df = dataframe.copy()
     temp_df = temp_df.sort_values(['Claim_Number', 'First_TimeStamp'])
@@ -157,17 +157,19 @@ def process_aggregated_dataframe(dataframe):
     aggregated_collapsed_df['Process'] = aggregated_collapsed_df['Aggregated_Process']
     
     # Add Aggregated_Process to main df for Claim View
-    if df is not None:
-        # Create mapping
-        mapping = temp_df.set_index(['Claim_Number', 'First_TimeStamp'])['Aggregated_Process']
+    if dataframe is not None:
+        # Ensure dataframe has First_TimeStamp as datetime
+        dataframe['First_TimeStamp'] = pd.to_datetime(dataframe['First_TimeStamp'])
         
-        # Ensure df has First_TimeStamp as datetime
-        df['First_TimeStamp'] = pd.to_datetime(df['First_TimeStamp'])
+        # Merge to add Aggregated_Process column
+        df = dataframe.merge(
+            temp_df[['Claim_Number', 'First_TimeStamp', 'Aggregated_Process']],
+            on=['Claim_Number', 'First_TimeStamp'],
+            how='left',
+            suffixes=('', '_agg')
+        )
         
-        # Map values
-        df['Aggregated_Process'] = df.set_index(['Claim_Number', 'First_TimeStamp']).index.map(mapping)
-        
-        # Fill NaN
+        # Fill NaN with original Process
         df['Aggregated_Process'] = df['Aggregated_Process'].fillna(df['Process'])
 
     print("Aggregated dataframe created.")

@@ -129,7 +129,7 @@ window.ClaimView = (function () {
 
         path.forEach((step, idx) => {
             const process = step.process;
-            
+
             // Count occurrences
             processCount[process] = (processCount[process] || 0) + 1;
 
@@ -157,9 +157,9 @@ window.ClaimView = (function () {
         const width = container.offsetWidth || 600;
         const height = Math.max(500, width * 0.75); // Dynamic height based on width
         const radius = Math.min(width, height) / 2 - 80; // Increased padding (was 60)
-        
+
         container.innerHTML = '<h4 style="color:#666; margin-bottom:15px; font-size: 14px;">Phase Flow Diagram</h4>';
-        
+
         const svg = d3.select(container)
             .append('svg')
             .attr('width', '100%')
@@ -173,7 +173,7 @@ window.ClaimView = (function () {
         const defs = svg.append('defs');
 
         const g = svg.append('g')
-            .attr('transform', `translate(${width/2},${height/2})`);
+            .attr('transform', `translate(${width / 2},${height / 2})`);
 
         // Add gradients for nodes
         const gradientGold = defs.append('linearGradient')
@@ -225,7 +225,7 @@ window.ClaimView = (function () {
         // Calculate angles for each process
         const angleStep = (2 * Math.PI) / processes.length;
         const processPositions = {};
-        
+
         processes.forEach((proc, i) => {
             const angle = i * angleStep - Math.PI / 2; // Start from top
             processPositions[proc] = {
@@ -241,11 +241,11 @@ window.ClaimView = (function () {
         Object.entries(transitions).forEach(([key, value]) => {
             const [source, target] = key.split('→');
             if (!processPositions[source] || !processPositions[target]) return;
-            
+
             const sourcePos = processPositions[source];
             const targetPos = processPositions[target];
             const linkColor = '#64748b'; // Neutral slate gray
-            
+
             // Create curved path with arrows
             g.append('path')
                 .datum({ source, target, value })
@@ -262,11 +262,11 @@ window.ClaimView = (function () {
                 .style('stroke-linecap', 'round')
                 .attr('marker-end', 'url(#arrow-gray)')
                 .attr('class', 'flow-link')
-                .on('mouseover', function(event, d) {
+                .on('mouseover', function (event, d) {
                     d3.select(this)
                         .style('opacity', 0.7)
                         .style('stroke-width', Math.max(4, Math.sqrt(d.value) * 3));
-                    
+
                     const tooltip = d3.select('body').append('div')
                         .attr('class', 'flow-tooltip')
                         .style('position', 'absolute')
@@ -282,7 +282,7 @@ window.ClaimView = (function () {
                         .style('left', (event.pageX + 10) + 'px')
                         .style('top', (event.pageY - 10) + 'px');
                 })
-                .on('mouseout', function(event, d) {
+                .on('mouseout', function (event, d) {
                     d3.select(this)
                         .style('opacity', 0.3)
                         .style('stroke-width', Math.max(2, Math.sqrt(d.value) * 2));
@@ -300,13 +300,13 @@ window.ClaimView = (function () {
 
         // Node circles with size based on count (increased size)
         const maxCount = Math.max(...Object.values(processCount));
-        
+
         // Add subtle glow effect
         nodeGroups.append('circle')
             .attr('r', d => 22 + (processCount[d] / maxCount) * 26)
             .style('fill', d => processPositions[d].isInvestigation ? 'rgba(99, 102, 241, 0.08)' : 'rgba(255, 208, 0, 0.08)')
             .style('stroke', 'none');
-        
+
         nodeGroups.append('circle')
             .attr('r', d => 20 + (processCount[d] / maxCount) * 24)
             .style('fill', d => processPositions[d].isInvestigation ? 'url(#gradient-indigo)' : 'url(#gradient-gold)')
@@ -314,14 +314,14 @@ window.ClaimView = (function () {
             .style('cursor', 'pointer')
             .style('opacity', 0.6)
             .style('filter', 'drop-shadow(0 1px 3px rgba(0,0,0,0.15))')
-            .on('mouseover', function(event, d) {
+            .on('mouseover', function (event, d) {
                 d3.select(this)
                     .transition()
                     .duration(200)
                     .attr('r', 24 + (processCount[d] / maxCount) * 28)
                     .style('opacity', 0.9)
                     .style('filter', 'drop-shadow(0 2px 6px rgba(0,0,0,0.25))');
-                
+
                 const tooltip = d3.select('body').append('div')
                     .attr('class', 'flow-tooltip')
                     .style('position', 'absolute')
@@ -337,7 +337,7 @@ window.ClaimView = (function () {
                     .style('left', (event.pageX + 10) + 'px')
                     .style('top', (event.pageY - 10) + 'px');
             })
-            .on('mouseout', function(event, d) {
+            .on('mouseout', function (event, d) {
                 d3.select(this)
                     .transition()
                     .duration(200)
@@ -580,7 +580,7 @@ window.ClaimView = (function () {
             `;
         });
         processHtml += '</div>';
-        
+
         // Append to existing content (don't overwrite the phase flow diagram)
         if (processAnalysis) {
             const tempDiv = document.createElement('div');
