@@ -690,7 +690,7 @@ window.ProcessFlow = (function () {
                 }
                 html += `<div style="font-size: 0.85em; color: #ccc; font-style: italic; margin-top: 3px; margin-left: 8px;">Average duration of entire claims passing through this node</div>`;
             }
-            
+
             html += `<hr style="margin: 5px 0; border: 0; border-top: 1px solid #eee;">`;
             html += `<div style="font-weight: bold; margin-bottom: 3px;">This Step Duration:</div>`;
             if (d.data.avgDuration !== undefined) {

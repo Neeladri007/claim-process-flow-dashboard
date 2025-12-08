@@ -123,42 +123,76 @@ window.ClaimView = (function () {
 
         console.log('Rendering phase flow diagram with', path.length, 'steps');
 
-        // Calculate process occurrences, transitions, and average durations
-        const processCount = {};
+        // Calculate process entries (times entering a process block), occurrences, transitions, and average durations
+        const processEntries = {}; // Number of times we enter/start a process block
+        const processOccurrences = {}; // Total number of steps in each process
         const processTotalDuration = {};
+        const processStepCount = {}; // Total steps within each process
         const transitions = {};
+        const transitionDurations = {}; // Track durations for each transition
 
+        let currentProcess = null;
+        let currentProcessStartIdx = 0;
+        
         path.forEach((step, idx) => {
             const process = step.process;
 
-            // Count occurrences
-            processCount[process] = (processCount[process] || 0) + 1;
-
-            // Accumulate duration for average calculation
-            processTotalDuration[process] = (processTotalDuration[process] || 0) + step.active_minutes;
-
-            // Count transitions to next process (excluding consecutive duplicates)
-            if (idx < path.length - 1) {
-                const nextProcess = path[idx + 1].process;
-                if (process !== nextProcess) {
-                    const key = `${process}→${nextProcess}`;
+            // Check if we're entering a new process block
+            if (process !== currentProcess) {
+                // We're entering a new process
+                processEntries[process] = (processEntries[process] || 0) + 1;
+                
+                // Record transition if not the first step
+                if (currentProcess !== null) {
+                    const key = `${currentProcess}→${process}`;
                     transitions[key] = (transitions[key] || 0) + 1;
+                    
+                    // Calculate duration of the source process block that led to this transition
+                    let blockDuration = 0;
+                    for (let i = currentProcessStartIdx; i < idx; i++) {
+                        blockDuration += path[i].active_minutes;
+                    }
+                    
+                    // Store duration for this transition
+                    if (!transitionDurations[key]) {
+                        transitionDurations[key] = [];
+                    }
+                    transitionDurations[key].push(blockDuration);
                 }
+                
+                currentProcess = process;
+                currentProcessStartIdx = idx;
             }
+            
+            // Count all occurrences (all steps)
+            processOccurrences[process] = (processOccurrences[process] || 0) + 1;
+            
+            // Count all steps for duration calculation
+            processStepCount[process] = (processStepCount[process] || 0) + 1;
+            processTotalDuration[process] = (processTotalDuration[process] || 0) + step.active_minutes;
         });
 
-        // Calculate average duration per process
+        // Calculate average duration per process (per step)
         const processAvgDuration = {};
-        Object.keys(processCount).forEach(proc => {
-            processAvgDuration[proc] = processTotalDuration[proc] / processCount[proc];
+        Object.keys(processStepCount).forEach(proc => {
+            processAvgDuration[proc] = processTotalDuration[proc] / processStepCount[proc];
+        });
+        
+        // Calculate average duration for each transition
+        const transitionAvgDuration = {};
+        Object.entries(transitionDurations).forEach(([key, durations]) => {
+            transitionAvgDuration[key] = durations.reduce((sum, d) => sum + d, 0) / durations.length;
         });
 
-        console.log('Process counts:', processCount);
+        console.log('Process entries (for flow counting):', processEntries);
+        console.log('Process occurrences (total steps):', processOccurrences);
+        console.log('Process step counts:', processStepCount);
         console.log('Process average durations:', processAvgDuration);
         console.log('Transitions:', transitions);
+        console.log('Transition average durations:', transitionAvgDuration);
 
-        // Prepare data
-        const processes = Object.keys(processCount);
+        // Prepare data - use processEntries as it represents the separate blocks
+        const processes = Object.keys(processEntries);
         if (processes.length === 0) {
             container.innerHTML = '<h4 style="color:#666; margin-bottom:15px;">Phase Flow Diagram</h4><p style="color:#999;">No phase data to display.</p>';
             return;
@@ -243,7 +277,7 @@ window.ClaimView = (function () {
                 angle: angle,
                 x: Math.cos(angle) * radius,
                 y: Math.sin(angle) * radius,
-                count: processCount[proc],
+                count: processEntries[proc], // Number of times we enter this process (separate blocks)
                 isInvestigation: proc === 'Investigation'
             };
         });
@@ -278,8 +312,11 @@ window.ClaimView = (function () {
                         .style('opacity', 0.7)
                         .style('stroke-width', Math.max(4, Math.sqrt(d.value) * 3));
 
+                    const transitionKey = `${d.source}→${d.target}`;
+                    const avgDuration = transitionAvgDuration[transitionKey] || 0;
+
                     // Debug log
-                    console.log('Transition hover:', d.source, '→', d.target, 'Avg:', processAvgDuration[d.source]);
+                    console.log('Transition hover:', d.source, '→', d.target, 'Avg duration in source before transition:', avgDuration);
 
                     // Remove any existing tooltips first
                     d3.selectAll('.flow-tooltip').remove();
@@ -298,7 +335,7 @@ window.ClaimView = (function () {
                         .style('box-shadow', '0 4px 12px rgba(0,0,0,0.3)')
                         .style('border', '2px solid #FFD000')
                         .style('max-width', '300px')
-                        .html(`<strong style="font-size: 14px;">${d.source} → ${d.target}</strong><br/>Transitions: <strong style="color: #FFD000;">${d.value}</strong><br/>Avg time in ${d.source}: <strong style="color: #FFD000;">${processAvgDuration[d.source].toFixed(2)} min</strong>`)
+                        .html(`<strong style="font-size: 14px;">${d.source} → ${d.target}</strong><br/>Transitions: <strong style="color: #FFD000;">${d.value}</strong><br/>Avg time in ${d.source} before transition: <strong style="color: #FFD000;">${avgDuration.toFixed(2)} min</strong>`)
                         .style('left', (event.clientX + 15) + 'px')
                         .style('top', (event.clientY + 15) + 'px')
                         .style('opacity', 0)
@@ -323,16 +360,16 @@ window.ClaimView = (function () {
             .attr('transform', d => `translate(${processPositions[d].x},${processPositions[d].y})`);
 
         // Node circles with size based on count (increased size)
-        const maxCount = Math.max(...Object.values(processCount));
+        const maxCount = Math.max(...Object.values(processEntries));
 
         // Add subtle glow effect
         nodeGroups.append('circle')
-            .attr('r', d => 22 + (processCount[d] / maxCount) * 26)
+            .attr('r', d => 22 + (processEntries[d] / maxCount) * 26)
             .style('fill', d => processPositions[d].isInvestigation ? 'rgba(99, 102, 241, 0.08)' : 'rgba(255, 208, 0, 0.08)')
             .style('stroke', 'none');
 
         nodeGroups.append('circle')
-            .attr('r', d => 20 + (processCount[d] / maxCount) * 24)
+            .attr('r', d => 20 + (processEntries[d] / maxCount) * 24)
             .style('fill', d => processPositions[d].isInvestigation ? 'url(#gradient-indigo)' : 'url(#gradient-gold)')
             .style('stroke', 'none')
             .style('cursor', 'pointer')
@@ -342,7 +379,7 @@ window.ClaimView = (function () {
                 d3.select(this)
                     .transition()
                     .duration(200)
-                    .attr('r', 24 + (processCount[d] / maxCount) * 28)
+                    .attr('r', 24 + (processEntries[d] / maxCount) * 28)
                     .style('opacity', 0.9)
                     .style('filter', 'drop-shadow(0 2px 6px rgba(0,0,0,0.25))');
 
@@ -357,7 +394,7 @@ window.ClaimView = (function () {
                     .style('pointer-events', 'none')
                     .style('z-index', '1000')
                     .style('box-shadow', '0 2px 8px rgba(0,0,0,0.15)')
-                    .html(`${d}<br/>Occurrences: <strong>${processCount[d]}</strong>`)
+                    .html(`${d}<br/>Occurrences: <strong>${processEntries[d]}</strong>`)
                     .style('left', (event.pageX + 10) + 'px')
                     .style('top', (event.pageY - 10) + 'px');
             })
@@ -365,7 +402,7 @@ window.ClaimView = (function () {
                 d3.select(this)
                     .transition()
                     .duration(200)
-                    .attr('r', 20 + (processCount[d] / maxCount) * 24)
+                    .attr('r', 20 + (processEntries[d] / maxCount) * 24)
                     .style('opacity', 0.6)
                     .style('filter', 'drop-shadow(0 1px 3px rgba(0,0,0,0.15))');
                 d3.selectAll('.flow-tooltip').remove();
@@ -375,7 +412,7 @@ window.ClaimView = (function () {
         nodeGroups.append('text')
             .attr('dy', d => {
                 const pos = processPositions[d];
-                return pos.y < 0 ? -30 - (processCount[d] / maxCount) * 26 : 35 + (processCount[d] / maxCount) * 26;
+                return pos.y < 0 ? -30 - (processEntries[d] / maxCount) * 26 : 35 + (processEntries[d] / maxCount) * 26;
             })
             .attr('text-anchor', 'middle')
             .style('font-size', '13px')
@@ -393,7 +430,7 @@ window.ClaimView = (function () {
             .style('fill', 'white')
             .style('text-shadow', '0 1px 2px rgba(0,0,0,0.4)')
             .style('pointer-events', 'none')
-            .text(d => processCount[d]);
+            .text(d => processEntries[d]);
 
         console.log('Phase flow diagram rendered successfully');
     }
