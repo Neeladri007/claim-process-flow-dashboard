@@ -244,6 +244,29 @@ def get_starting_processes():
     result = pd.merge(result, std_durations, on='process')
     result['std_duration'] = result['std_duration'].fillna(0)
     
+    # For starting processes, calculate total claim duration for claims starting with each process
+    # Get total duration for each claim
+    claim_totals = target_df.groupby('Claim_Number')['Active_Minutes'].sum().reset_index()
+    claim_totals.columns = ['Claim_Number', 'total_claim_duration']
+    
+    # Join with starting_processes to get the starting process for each claim
+    starting_with_totals = pd.merge(starting_processes, claim_totals, on='Claim_Number')
+    
+    # Calculate average and median total claim duration by starting process
+    total_dur_mean = starting_with_totals.groupby('Process')['total_claim_duration'].mean().round(1).reset_index()
+    total_dur_mean.columns = ['process', 'mean_total_claim_duration']
+    
+    total_dur_median = starting_with_totals.groupby('Process')['total_claim_duration'].median().round(1).reset_index()
+    total_dur_median.columns = ['process', 'median_total_claim_duration']
+    
+    # Merge total claim durations
+    result = pd.merge(result, total_dur_mean, on='process')
+    result = pd.merge(result, total_dur_median, on='process')
+    
+    # For starting processes, cumulative time = step duration (first step)
+    result['mean_cumulative_time'] = result['avg_duration']
+    result['median_cumulative_time'] = result['median_duration']
+    
     return jsonify({
         "total_claims": total_claims,
         "starting_processes": result.to_dict(orient='records')
@@ -321,6 +344,19 @@ def get_process_flow(process_name):
         cum_median = next_steps_with_cum.groupby('Process')['cumulative_time'].median().round(1).reset_index()
         cum_median.columns = ['process', 'median_cumulative_time']
         
+        # Calculate TOTAL claim duration (from start to end of entire claim)
+        total_claim_durations = target_df[target_df['Claim_Number'].isin(continuing_claims)].groupby('Claim_Number')['Active_Minutes'].sum().reset_index()
+        total_claim_durations.columns = ['Claim_Number', 'total_claim_duration']
+        
+        # Join with next_steps_df to group by process
+        next_steps_with_total_dur = pd.merge(next_steps_df, total_claim_durations, on='Claim_Number')
+        
+        total_dur_mean = next_steps_with_total_dur.groupby('Process')['total_claim_duration'].mean().round(1).reset_index()
+        total_dur_mean.columns = ['process', 'mean_total_claim_duration']
+        
+        total_dur_median = next_steps_with_total_dur.groupby('Process')['total_claim_duration'].median().round(1).reset_index()
+        total_dur_median.columns = ['process', 'median_total_claim_duration']
+        
         # Calculate remaining steps (avg)
         # For each claim, count total steps and subtract current step index (1)
         # We need the total count for each claim
@@ -339,6 +375,8 @@ def get_process_flow(process_name):
         result_df = pd.merge(result_df, std_durations, on='process')
         result_df = pd.merge(result_df, cum_mean, on='process')
         result_df = pd.merge(result_df, cum_median, on='process')
+        result_df = pd.merge(result_df, total_dur_mean, on='process')
+        result_df = pd.merge(result_df, total_dur_median, on='process')
         result_df = pd.merge(result_df, avg_remaining, on='process', how='left')
         result_df['avg_remaining_steps'] = result_df['avg_remaining_steps'].fillna(0)
         result_df['std_duration'] = result_df['std_duration'].fillna(0)
@@ -445,6 +483,19 @@ def get_process_flow_after_path():
         cum_median = target_with_cum.groupby('Process')['cumulative_time'].median().round(1).reset_index()
         cum_median.columns = ['process', 'median_cumulative_time']
         
+        # Calculate TOTAL claim duration (from start to end of entire claim)
+        total_claim_durations = target_df[target_df['Claim_Number'].isin(valid_claims)].groupby('Claim_Number')['Active_Minutes'].sum().reset_index()
+        total_claim_durations.columns = ['Claim_Number', 'total_claim_duration']
+        
+        # Join with target_rows to group by process
+        target_with_total_dur = pd.merge(target_rows, total_claim_durations, on='Claim_Number')
+        
+        total_dur_mean = target_with_total_dur.groupby('Process')['total_claim_duration'].mean().round(1).reset_index()
+        total_dur_mean.columns = ['process', 'mean_total_claim_duration']
+        
+        total_dur_median = target_with_total_dur.groupby('Process')['total_claim_duration'].median().round(1).reset_index()
+        total_dur_median.columns = ['process', 'median_total_claim_duration']
+        
         # Remaining steps
         # Get total steps for these claims
         claim_total_steps = target_df[target_df['Claim_Number'].isin(valid_claims)].groupby('Claim_Number').size().reset_index(name='total_steps')
@@ -462,6 +513,8 @@ def get_process_flow_after_path():
         result_df = pd.merge(result_df, std_durations, on='process')
         result_df = pd.merge(result_df, cum_mean, on='process')
         result_df = pd.merge(result_df, cum_median, on='process')
+        result_df = pd.merge(result_df, total_dur_mean, on='process')
+        result_df = pd.merge(result_df, total_dur_median, on='process')
         result_df = pd.merge(result_df, avg_remaining, on='process', how='left')
         result_df['avg_remaining_steps'] = result_df['avg_remaining_steps'].fillna(0)
         result_df['std_duration'] = result_df['std_duration'].fillna(0)

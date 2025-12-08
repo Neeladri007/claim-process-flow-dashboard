@@ -123,8 +123,9 @@ window.ClaimView = (function () {
 
         console.log('Rendering phase flow diagram with', path.length, 'steps');
 
-        // Calculate process occurrences and transitions
+        // Calculate process occurrences, transitions, and average durations
         const processCount = {};
+        const processTotalDuration = {};
         const transitions = {};
 
         path.forEach((step, idx) => {
@@ -132,6 +133,9 @@ window.ClaimView = (function () {
 
             // Count occurrences
             processCount[process] = (processCount[process] || 0) + 1;
+
+            // Accumulate duration for average calculation
+            processTotalDuration[process] = (processTotalDuration[process] || 0) + step.active_minutes;
 
             // Count transitions to next process (excluding consecutive duplicates)
             if (idx < path.length - 1) {
@@ -143,7 +147,14 @@ window.ClaimView = (function () {
             }
         });
 
+        // Calculate average duration per process
+        const processAvgDuration = {};
+        Object.keys(processCount).forEach(proc => {
+            processAvgDuration[proc] = processTotalDuration[proc] / processCount[proc];
+        });
+
         console.log('Process counts:', processCount);
+        console.log('Process average durations:', processAvgDuration);
         console.log('Transitions:', transitions);
 
         // Prepare data
@@ -267,20 +278,33 @@ window.ClaimView = (function () {
                         .style('opacity', 0.7)
                         .style('stroke-width', Math.max(4, Math.sqrt(d.value) * 3));
 
+                    // Debug log
+                    console.log('Transition hover:', d.source, '→', d.target, 'Avg:', processAvgDuration[d.source]);
+
+                    // Remove any existing tooltips first
+                    d3.selectAll('.flow-tooltip').remove();
+
                     const tooltip = d3.select('body').append('div')
                         .attr('class', 'flow-tooltip')
-                        .style('position', 'absolute')
+                        .style('position', 'fixed')
                         .style('background', '#1A1446')
                         .style('color', 'white')
-                        .style('padding', '8px 12px')
-                        .style('border-radius', '6px')
-                        .style('font-size', '12px')
+                        .style('padding', '10px 14px')
+                        .style('border-radius', '8px')
+                        .style('font-size', '13px')
+                        .style('line-height', '1.6')
                         .style('pointer-events', 'none')
-                        .style('z-index', '1000')
-                        .style('box-shadow', '0 2px 8px rgba(0,0,0,0.15)')
-                        .html(`${d.source} → ${d.target}<br/>Transitions: <strong>${d.value}</strong>`)
-                        .style('left', (event.pageX + 10) + 'px')
-                        .style('top', (event.pageY - 10) + 'px');
+                        .style('z-index', '999999')
+                        .style('box-shadow', '0 4px 12px rgba(0,0,0,0.3)')
+                        .style('border', '2px solid #FFD000')
+                        .style('max-width', '300px')
+                        .html(`<strong style="font-size: 14px;">${d.source} → ${d.target}</strong><br/>Transitions: <strong style="color: #FFD000;">${d.value}</strong><br/>Avg time in ${d.source}: <strong style="color: #FFD000;">${processAvgDuration[d.source].toFixed(2)} min</strong>`)
+                        .style('left', (event.clientX + 15) + 'px')
+                        .style('top', (event.clientY + 15) + 'px')
+                        .style('opacity', 0)
+                        .transition()
+                        .duration(200)
+                        .style('opacity', 1);
                 })
                 .on('mouseout', function (event, d) {
                     d3.select(this)

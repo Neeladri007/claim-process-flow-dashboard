@@ -61,6 +61,10 @@ window.ProcessFlow = (function () {
                 stdDuration: sp.std_duration || 0,
                 medianDuration: sp.median_duration || 0,
                 maxDuration: sp.max_duration || 0,
+                meanCumulativeTime: sp.mean_cumulative_time || sp.avg_duration || 0,
+                medianCumulativeTime: sp.median_cumulative_time || sp.median_duration || 0,
+                meanTotalClaimDuration: sp.mean_total_claim_duration || 0,
+                medianTotalClaimDuration: sp.median_total_claim_duration || 0,
                 path: [sp.process],
                 children: [],
                 hasChildren: true,
@@ -165,6 +169,8 @@ window.ProcessFlow = (function () {
                         maxDuration: step.max_duration || 0,
                         meanCumulativeTime: step.mean_cumulative_time || 0,
                         medianCumulativeTime: step.median_cumulative_time || 0,
+                        meanTotalClaimDuration: step.mean_total_claim_duration || 0,
+                        medianTotalClaimDuration: step.median_total_claim_duration || 0,
                         avgRemainingSteps: step.avg_remaining_steps || 0,
                         path: childPath,  // Store full path including this node
                         children: [],
@@ -671,34 +677,39 @@ window.ProcessFlow = (function () {
         }
 
         if (!d.data.isRoot && !d.data.isTermination) {
+            // Show Branch Average Time prominently at the top
+            if (d.data.meanTotalClaimDuration !== undefined || d.data.medianTotalClaimDuration !== undefined) {
+                html += `<hr style="margin: 5px 0; border: 0; border-top: 1px solid #eee;">`;
+                html += `<div style="font-weight: bold; margin-bottom: 3px; color: #667eea; font-size: 1.05em;">Total Claim Duration (Branch):</div>`;
+
+                if (d.data.meanTotalClaimDuration !== undefined) {
+                    html += `<div style="font-size: 1.1em; color: white; font-weight: 600; margin-left: 8px;">Avg: ${d.data.meanTotalClaimDuration.toFixed(2)} min</div>`;
+                }
+                if (d.data.medianTotalClaimDuration !== undefined) {
+                    html += `<div style="margin-left: 8px; color: white;">Median: ${d.data.medianTotalClaimDuration.toFixed(2)} min</div>`;
+                }
+                html += `<div style="font-size: 0.85em; color: #ccc; font-style: italic; margin-top: 3px; margin-left: 8px;">Average duration of entire claims passing through this node</div>`;
+            }
+            
             html += `<hr style="margin: 5px 0; border: 0; border-top: 1px solid #eee;">`;
-            html += `<div style="font-weight: bold; margin-bottom: 3px;">Step Duration:</div>`;
+            html += `<div style="font-weight: bold; margin-bottom: 3px;">This Step Duration:</div>`;
             if (d.data.avgDuration !== undefined) {
-                html += `<div>Avg: ${d.data.avgDuration} min</div>`;
+                html += `<div>Avg: ${d.data.avgDuration.toFixed(2)} min</div>`;
             }
             if (d.data.stdDuration !== undefined) {
-                html += `<div>Std Dev: ${d.data.stdDuration} min</div>`;
+                html += `<div>Std Dev: ${d.data.stdDuration.toFixed(2)} min</div>`;
             }
             if (d.data.medianDuration !== undefined) {
-                html += `<div>Median: ${d.data.medianDuration} min</div>`;
+                html += `<div>Median: ${d.data.medianDuration.toFixed(2)} min</div>`;
             }
             if (d.data.maxDuration !== undefined) {
-                html += `<div>Max: ${d.data.maxDuration} min</div>`;
+                html += `<div>Max: ${d.data.maxDuration.toFixed(2)} min</div>`;
             }
 
-            if (d.data.meanCumulativeTime !== undefined || d.data.avgRemainingSteps !== undefined) {
+            if (d.data.avgRemainingSteps !== undefined) {
                 html += `<hr style="margin: 5px 0; border: 0; border-top: 1px solid #eee;">`;
-                html += `<div style="font-weight: bold; margin-bottom: 3px;">Process Stats:</div>`;
-
-                if (d.data.meanCumulativeTime !== undefined) {
-                    html += `<div>Time from Start (Avg): ${d.data.meanCumulativeTime} min</div>`;
-                }
-                if (d.data.medianCumulativeTime !== undefined) {
-                    html += `<div>Time from Start (Med): ${d.data.medianCumulativeTime} min</div>`;
-                }
-                if (d.data.avgRemainingSteps !== undefined) {
-                    html += `<div>Avg Steps Remaining: ${d.data.avgRemainingSteps}</div>`;
-                }
+                html += `<div style="font-weight: bold; margin-bottom: 3px;">Future Path:</div>`;
+                html += `<div>Avg Steps Remaining: ${d.data.avgRemainingSteps.toFixed(1)}</div>`;
             }
         }
 
