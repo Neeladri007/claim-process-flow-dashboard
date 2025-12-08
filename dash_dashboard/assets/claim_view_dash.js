@@ -133,7 +133,7 @@ window.ClaimView = (function () {
 
         let currentProcess = null;
         let currentProcessStartIdx = 0;
-        
+
         path.forEach((step, idx) => {
             const process = step.process;
 
@@ -141,32 +141,32 @@ window.ClaimView = (function () {
             if (process !== currentProcess) {
                 // We're entering a new process
                 processEntries[process] = (processEntries[process] || 0) + 1;
-                
+
                 // Record transition if not the first step
                 if (currentProcess !== null) {
                     const key = `${currentProcess}→${process}`;
                     transitions[key] = (transitions[key] || 0) + 1;
-                    
+
                     // Calculate duration of the source process block that led to this transition
                     let blockDuration = 0;
                     for (let i = currentProcessStartIdx; i < idx; i++) {
                         blockDuration += path[i].active_minutes;
                     }
-                    
+
                     // Store duration for this transition
                     if (!transitionDurations[key]) {
                         transitionDurations[key] = [];
                     }
                     transitionDurations[key].push(blockDuration);
                 }
-                
+
                 currentProcess = process;
                 currentProcessStartIdx = idx;
             }
-            
+
             // Count all occurrences (all steps)
             processOccurrences[process] = (processOccurrences[process] || 0) + 1;
-            
+
             // Count all steps for duration calculation
             processStepCount[process] = (processStepCount[process] || 0) + 1;
             processTotalDuration[process] = (processTotalDuration[process] || 0) + step.active_minutes;
@@ -177,7 +177,7 @@ window.ClaimView = (function () {
         Object.keys(processStepCount).forEach(proc => {
             processAvgDuration[proc] = processTotalDuration[proc] / processStepCount[proc];
         });
-        
+
         // Calculate average duration for each transition
         const transitionAvgDuration = {};
         Object.entries(transitionDurations).forEach(([key, durations]) => {
