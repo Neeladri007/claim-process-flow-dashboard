@@ -81,7 +81,7 @@ window.ClaimView = (function () {
 
     async function searchClaim() {
         const claimInput = document.getElementById('claimInput');
-        const claimNumber = claimInput.value.trim();
+        let claimNumber = claimInput.value.trim();
         const errorDiv = document.getElementById('errorMessage');
         const resultsArea = document.getElementById('resultsArea');
         const timeline = document.getElementById('timeline');
@@ -94,6 +94,11 @@ window.ClaimView = (function () {
         if (!claimNumber) {
             showError('Please enter a claim number');
             return;
+        }
+
+        // Ensure claim number starts with "0"
+        if (!claimNumber.startsWith('0')) {
+            claimNumber = '0' + claimNumber;
         }
 
         try {

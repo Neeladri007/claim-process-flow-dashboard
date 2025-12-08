@@ -51,6 +51,10 @@ def process_dataframe(dataframe):
     
     # Convert Claim_Number to string to preserve leading zeros
     df['Claim_Number'] = df['Claim_Number'].astype(str)
+    
+    # Ensure all claim numbers start with "0"
+    df['Claim_Number'] = df['Claim_Number'].apply(lambda x: x if x.startswith('0') else '0' + x)
+    
     df['First_TimeStamp'] = pd.to_datetime(df['First_TimeStamp'])
     
     # Calculate summary statistics
