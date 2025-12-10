@@ -571,6 +571,8 @@ button:hover {
     height: 6px;
     width: 100%;
     overflow: hidden;
+    cursor: help;
+    position: relative;
 }
 
 .process-duration-bar {
@@ -667,6 +669,8 @@ button:hover {
     height: 6px;
     width: 100%;
     overflow: hidden;
+    cursor: help;
+    position: relative;
 }
 
 .duration-bar {

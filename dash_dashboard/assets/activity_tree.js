@@ -39,11 +39,18 @@ window.ActivityFlow = (function () {
 
     // Load all starting processes and display them with a START root node
     async function loadAllStartingProcesses(force = false) {
+        // Clear cache if forcing reload
+        if (force) {
+            console.log('Forcing data reload, clearing cache...');
+            treeData = null;
+            initialStatsData = null;
+        }
+
         // Check if we already have data and not forcing reload
         if (!force && treeData && initialStatsData) {
             console.log('Restoring existing tree state...');
             initModal();
-            updateStats(initialStatsData);
+            // updateStats(initialStatsData);
             drawTree(treeData);
             hideLoading();
             return;
@@ -129,7 +136,7 @@ window.ActivityFlow = (function () {
             };
 
             // Update stats
-            updateStats(data.total_claims);
+            // updateStats(data.total_claims);
 
             // Draw tree
             drawTree(treeData);

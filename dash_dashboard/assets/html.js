@@ -12,11 +12,19 @@ window.ProcessFlow = (function () {
     let initialStatsData = null;
     let sortState = { column: null, direction: 'asc' };
     let viewMode = 'detailed'; // 'detailed' or 'aggregated'
+    let filteredClaims = null; // Store filtered claims
 
-    // Fetch API wrapper
+    // Fetch API wrapper with filtered claims support
     async function fetchAPI(endpoint) {
         try {
-            const response = await fetch(`${API_BASE}${endpoint}`);
+            // Add filtered claims to endpoint if available
+            let url = `${API_BASE}${endpoint}`;
+            if (filteredClaims && filteredClaims.length > 0) {
+                const separator = endpoint.includes('?') ? '&' : '?';
+                url += `${separator}filtered_claims=${encodeURIComponent(JSON.stringify(filteredClaims))}`;
+            }
+
+            const response = await fetch(url);
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
@@ -29,11 +37,19 @@ window.ProcessFlow = (function () {
 
     // Load all starting processes and display them with a START root node
     async function loadAllStartingProcesses(force = false) {
+        // Clear cache if forcing reload
+        if (force) {
+            console.log('Forcing data reload, clearing cache...');
+            treeData = null;
+            initialStatsData = null;
+            allStartingProcesses = null;
+        }
+
         // Check if we already have data and not forcing reload
         if (!force && treeData && initialStatsData) {
             console.log('Restoring existing tree state...');
             initModal();
-            updateStats(initialStatsData);
+            // updateStats(initialStatsData);
             drawTree(treeData);
             hideLoading();
             return;
@@ -86,7 +102,7 @@ window.ProcessFlow = (function () {
             };
 
             // Update stats
-            updateStats(data);
+            // updateStats(data);
 
             // Draw tree
             drawTree(treeData);
@@ -1030,8 +1046,56 @@ window.ProcessFlow = (function () {
         loadAllStartingProcesses(true);
     }
 
+    function setFilteredClaims(claims) {
+        filteredClaims = claims;
+        console.log('Filtered claims set:', claims ? claims.length : 'all');
+    }
+
+    function init(force = false) {
+        // Check if filtered claims are stored in Dash
+        const filteredStore = document.getElementById('filtered-claims-store');
+        if (filteredStore) {
+            try {
+                // Try multiple ways to access the store data
+                let storeData = null;
+
+                // Method 1: Check data attribute
+                if (filteredStore.dataset && filteredStore.dataset.data) {
+                    storeData = JSON.parse(filteredStore.dataset.data);
+                }
+
+                // Method 2: Check if data is stored directly on element
+                if (!storeData && filteredStore.data) {
+                    storeData = filteredStore.data;
+                }
+
+                // Method 3: Check innerHTML (Dash sometimes stores it here)
+                if (!storeData && filteredStore.innerHTML) {
+                    try {
+                        storeData = JSON.parse(filteredStore.innerHTML);
+                    } catch (e) {
+                        // Not JSON
+                    }
+                }
+
+                if (storeData && Array.isArray(storeData)) {
+                    filteredClaims = storeData;
+                    console.log('Loaded filtered claims:', filteredClaims.length);
+                } else {
+                    console.log('No valid filtered claims in store, using all claims');
+                    filteredClaims = null;
+                }
+            } catch (e) {
+                console.error('Error loading filtered claims:', e);
+                filteredClaims = null;
+            }
+        }
+        loadAllStartingProcesses(force);
+    }
+
     return {
-        init: loadAllStartingProcesses,
+        init: init,
+        setFilteredClaims: setFilteredClaims,
         openClaimsModal: openClaimsModal,
         closeModal: closeModal,
         viewClaim: viewClaim,

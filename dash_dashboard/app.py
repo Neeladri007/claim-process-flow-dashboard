@@ -8,6 +8,14 @@ import numpy as np
 import base64
 import io
 
+# Import Snowflake sync module
+try:
+    from snowflake_sync import sync_claims_data, get_last_sync_info
+    SNOWFLAKE_ENABLED = True
+except ImportError as e:
+    print(f"Snowflake sync not available: {e}")
+    SNOWFLAKE_ENABLED = False
+
 # Initialize Flask server
 server = Flask(__name__)
 
@@ -29,6 +37,7 @@ df = None
 collapsed_df = None
 activity_collapsed_df = None
 aggregated_collapsed_df = None
+exposure_df = None
 current_data_file = None
 data_summary = {}
 
@@ -38,7 +47,11 @@ def get_latest_csv():
     if not os.path.exists(DATA_DIR):
         os.makedirs(DATA_DIR)
     
-    files = [os.path.join(DATA_DIR, f) for f in os.listdir(DATA_DIR) if f.endswith('.csv')]
+    # Exclude Snowflake/exposure data files
+    files = [
+        os.path.join(DATA_DIR, f) for f in os.listdir(DATA_DIR) 
+        if f.endswith('.csv') and 'snowflake' not in f.lower() and f != 'sync_tracking.csv'
+    ]
     if not files:
         return None
     
@@ -49,10 +62,8 @@ def process_dataframe(dataframe):
     global df, collapsed_df, activity_collapsed_df, data_summary
     df = dataframe
     
-    # Convert Claim_Number to string to preserve leading zeros
+    # Convert Claim_Number to string and ensure it starts with 0
     df['Claim_Number'] = df['Claim_Number'].astype(str)
-    
-    # Ensure all claim numbers start with "0"
     df['Claim_Number'] = df['Claim_Number'].apply(lambda x: x if x.startswith('0') else '0' + x)
     
     df['First_TimeStamp'] = pd.to_datetime(df['First_TimeStamp'])
@@ -178,28 +189,110 @@ def process_aggregated_dataframe(dataframe):
 
     print("Aggregated dataframe created.")
 
+def load_exposure_data():
+    """Load Snowflake exposure data if available."""
+    global exposure_df
+    
+    exposure_file = os.path.join(DATA_DIR, 'dummy_snowflake_data.csv')
+    if os.path.exists(exposure_file):
+        try:
+            exposure_df = pd.read_csv(exposure_file, dtype={
+                'CLAIM_NBR': str,
+                'CLAIM_OWNR_EMPLY_NBR': str,
+                'CAT_IND': str
+            })
+            # Ensure claim numbers start with 0
+            exposure_df['CLAIM_NBR'] = exposure_df['CLAIM_NBR'].apply(
+                lambda x: str(x) if str(x).startswith('0') else '0' + str(x)
+            )
+            print(f"Loaded {len(exposure_df)} exposure records for {exposure_df['CLAIM_NBR'].nunique()} claims")
+            return True
+        except Exception as e:
+            print(f"Error loading exposure data: {e}")
+            exposure_df = None
+            return False
+    else:
+        print(f"No exposure data found at {exposure_file}")
+        exposure_df = None
+        return False
+
+# Sync data from Snowflake on startup
+if SNOWFLAKE_ENABLED:
+    print("\n" + "="*60)
+    print("Initializing Snowflake data sync...")
+    print("="*60)
+    try:
+        sync_success = sync_claims_data()
+        if sync_success:
+            sync_info = get_last_sync_info()
+            if sync_info:
+                print(f"\n✓ Snowflake sync completed successfully")
+                print(f"  Last sync: {sync_info['last_sync_timestamp']}")
+                print(f"  Total claims: {sync_info['total_claims']}")
+                print(f"  New claims added: {sync_info['new_claims_added']}")
+        else:
+            print("\n⚠ Snowflake sync encountered issues, using existing data")
+    except Exception as e:
+        print(f"\n⚠ Snowflake sync error: {e}")
+        print("  Continuing with existing data...")
+    print("="*60 + "\n")
+else:
+    print("\n⚠ Snowflake sync disabled - missing dependencies or configuration")
+
 def load_data(filename=None):
     global current_data_file
     
     if filename:
-        csv_path = os.path.join(DATA_DIR, filename)
-        if not os.path.exists(csv_path):
-            print(f"File not found: {csv_path}")
-            return False
+        # Handle both single filename and list of filenames
+        if isinstance(filename, list):
+            if len(filename) == 0:
+                print("No files selected")
+                return False
+            
+            # Load and merge multiple files
+            dataframes = []
+            for fname in filename:
+                csv_path = os.path.join(DATA_DIR, fname)
+                if not os.path.exists(csv_path):
+                    print(f"File not found: {csv_path}")
+                    continue
+                print(f"Loading data from {csv_path}...")
+                temp_df = pd.read_csv(csv_path, dtype={'Claim_Number': str})
+                dataframes.append(temp_df)
+            
+            if not dataframes:
+                print("No valid files found")
+                return False
+            
+            # Merge all dataframes
+            merged_df = pd.concat(dataframes, ignore_index=True)
+            process_dataframe(merged_df)
+            current_data_file = filename  # Store as list
+            return True
+        else:
+            # Single filename (string)
+            csv_path = os.path.join(DATA_DIR, filename)
+            if not os.path.exists(csv_path):
+                print(f"File not found: {csv_path}")
+                return False
+            print(f"Loading data from {csv_path}...")
+            temp_df = pd.read_csv(csv_path, dtype={'Claim_Number': str})
+            process_dataframe(temp_df)
+            current_data_file = [filename]  # Store as list for consistency
+            return True
     else:
         csv_path = get_latest_csv()
-    
-    if not csv_path:
-        print(f"No CSV file found in: {DATA_DIR}")
-        return False
-
-    print(f"Loading data from {csv_path}...")
-    temp_df = pd.read_csv(csv_path, dtype={'Claim_Number': str})
-    process_dataframe(temp_df)
-    current_data_file = os.path.basename(csv_path)
-    return True
+        if not csv_path:
+            print(f"No CSV file found in: {DATA_DIR}")
+            return False
+        print(f"Loading data from {csv_path}...")
+        temp_df = pd.read_csv(csv_path, dtype={'Claim_Number': str})
+        process_dataframe(temp_df)
+        current_data_file = [os.path.basename(csv_path)]  # Store as list
+        return True
 
 load_data()
+load_exposure_data()
 
 # --- API Routes ---
 
@@ -210,6 +303,20 @@ def get_starting_processes():
     
     if target_df is None:
         return jsonify({"error": "Data not loaded"}), 500
+    
+    # Get filtered claims if provided
+    filtered_claims_param = request.args.get('filtered_claims')
+    if filtered_claims_param:
+        try:
+            filtered_claims = json.loads(filtered_claims_param)
+            if filtered_claims:
+                print(f"[starting-processes] Filtering with {len(filtered_claims)} claims. Sample: {filtered_claims[:3]}")
+                print(f"[starting-processes] Before filter: {len(target_df)} rows, {target_df['Claim_Number'].nunique()} unique claims")
+                target_df = target_df[target_df['Claim_Number'].isin(filtered_claims)]
+                print(f"[starting-processes] After filter: {len(target_df)} rows, {target_df['Claim_Number'].nunique()} unique claims")
+        except Exception as e:
+            print(f"[starting-processes] Error parsing filtered claims: {e}")
+            pass  # If parsing fails, use all claims
     
     # Get total claims for percentage calculations
     total_claims_count = len(target_df['Claim_Number'].unique())
@@ -284,6 +391,16 @@ def get_process_flow(process_name):
     
     if target_df is None:
         return jsonify({"error": "Data not loaded"}), 500
+    
+    # Get filtered claims if provided
+    filtered_claims_param = request.args.get('filtered_claims')
+    if filtered_claims_param:
+        try:
+            filtered_claims = json.loads(filtered_claims_param)
+            if filtered_claims:
+                target_df = target_df[target_df['Claim_Number'].isin(filtered_claims)]
+        except:
+            pass  # If parsing fails, use all claims
     
     if filter_type == 'starting':
         # Find claims that START with this process
@@ -410,6 +527,16 @@ def get_process_flow_after_path():
     
     if target_df is None:
         return jsonify({"error": "Data not loaded"}), 500
+    
+    # Get filtered claims if provided
+    filtered_claims_param = request.args.get('filtered_claims')
+    if filtered_claims_param:
+        try:
+            filtered_claims = json.loads(filtered_claims_param)
+            if filtered_claims:
+                target_df = target_df[target_df['Claim_Number'].isin(filtered_claims)]
+        except:
+            pass  # If parsing fails, use all claims
         
     # Filter claims that have the first node of the path (optimization)
     first_node = path[0]
@@ -790,12 +917,77 @@ def get_claims_at_step():
         "claims": result.to_dict(orient='records')
     })
 
+@server.route('/api/filter-options')
+def get_filter_options():
+    """Get unique values for each filter field from exposure data."""
+    if exposure_df is None:
+        return jsonify({"error": "Exposure data not loaded"}), 500
+    
+    try:
+        filter_options = {
+            "loss_st_desc": sorted([x for x in exposure_df['LOSS_ST_DESC'].dropna().unique() if x]),
+            "loss_city_nme": sorted([x for x in exposure_df['LOSS_CITY_NME'].dropna().unique() if x]),
+            "claim_ownr_emply_nbr": sorted([x for x in exposure_df['CLAIM_OWNR_EMPLY_NBR'].dropna().unique() if x]),
+            "claim_seg_desc": sorted([x for x in exposure_df['CLAIM_SEG_DESC'].dropna().unique() if x]),
+            "claim_tier_desc": sorted([x for x in exposure_df['CLAIM_TIER_DESC'].dropna().unique() if x]),
+            "cat_ind": sorted([x for x in exposure_df['CAT_IND'].dropna().unique() if x])
+        }
+        return jsonify(filter_options)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@server.route('/api/filtered-claims')
+def get_filtered_claims():
+    """Get claim numbers that match the selected filters."""
+    if exposure_df is None:
+        return jsonify({"error": "Exposure data not loaded"}), 500
+    
+    try:
+        # Get filter parameters
+        loss_st_desc = request.args.getlist('loss_st_desc')
+        loss_city_nme = request.args.getlist('loss_city_nme')
+        claim_ownr_emply_nbr = request.args.getlist('claim_ownr_emply_nbr')
+        claim_seg_desc = request.args.getlist('claim_seg_desc')
+        claim_tier_desc = request.args.getlist('claim_tier_desc')
+        cat_ind = request.args.getlist('cat_ind')
+        
+        # Start with all claims
+        filtered_df = exposure_df.copy()
+        
+        # Apply filters
+        if loss_st_desc:
+            filtered_df = filtered_df[filtered_df['LOSS_ST_DESC'].isin(loss_st_desc)]
+        if loss_city_nme:
+            filtered_df = filtered_df[filtered_df['LOSS_CITY_NME'].isin(loss_city_nme)]
+        if claim_ownr_emply_nbr:
+            filtered_df = filtered_df[filtered_df['CLAIM_OWNR_EMPLY_NBR'].isin(claim_ownr_emply_nbr)]
+        if claim_seg_desc:
+            filtered_df = filtered_df[filtered_df['CLAIM_SEG_DESC'].isin(claim_seg_desc)]
+        if claim_tier_desc:
+            filtered_df = filtered_df[filtered_df['CLAIM_TIER_DESC'].isin(claim_tier_desc)]
+        if cat_ind:
+            filtered_df = filtered_df[filtered_df['CAT_IND'].isin(cat_ind)]
+        
+        # Get unique claim numbers
+        claim_numbers = filtered_df['CLAIM_NBR'].unique().tolist()
+        
+        return jsonify({
+            "claim_numbers": claim_numbers,
+            "count": len(claim_numbers)
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @server.route('/api/data-files')
 def get_data_files():
     if not os.path.exists(DATA_DIR):
         return jsonify({"files": []})
     
-    files = [f for f in os.listdir(DATA_DIR) if f.endswith('.csv')]
+    # Exclude Snowflake/exposure data files from the dropdown
+    files = [
+        f for f in os.listdir(DATA_DIR) 
+        if f.endswith('.csv') and 'snowflake' not in f.lower() and f != 'sync_tracking.csv'
+    ]
     
     # Create friendly labels for each file
     file_options = []
@@ -882,10 +1074,60 @@ def get_claim_path(claim_number):
             "active_minutes": float(row['Active_Minutes'])
         })
     
+    # Get claim exposure/policy data from Snowflake data
+    claim_info = None
+    exposures = []
+    if exposure_df is not None and not exposure_df.empty:
+        exposure_rows = exposure_df[exposure_df['CLAIM_NBR'] == claim_number_str]
+        if not exposure_rows.empty:
+            # Get claim-level info from first row
+            first_row = exposure_rows.iloc[0]
+            claim_info = {
+                "claim_number": claim_number_str,
+                "claim_status": str(first_row.get('CLAIM_STTS_DESC', 'N/A')),
+                "claim_reported_date": str(first_row.get('CLAIM_RPTD_DT', 'N/A')),
+                "claim_open_date": str(first_row.get('CLAIM_OPEN_DT', 'N/A')),
+                "claim_closed_date": str(first_row.get('CLAIM_CLSD_DT', 'N/A')),
+                "claim_segment": str(first_row.get('CLAIM_SEG_DESC', 'N/A')),
+                "claim_tier": str(first_row.get('CLAIM_TIER_DESC', 'N/A')),
+                "loss_date": str(first_row.get('LOSS_DT', 'N/A')),
+                "loss_type": str(first_row.get('LOSS_TYPE_DESC', 'N/A')),
+                "loss_city": str(first_row.get('LOSS_CITY_NME', 'N/A')),
+                "loss_state": str(first_row.get('LOSS_ST_DESC', 'N/A')),
+                "cat_indicator": str(first_row.get('CAT_IND', 'N/A')),
+                "policy_number": str(first_row.get('POLICY_NBR', 'N/A')),
+                "policy_state": str(first_row.get('POLICY_ST_DESC', 'N/A')),
+                "policy_effective_date": str(first_row.get('POLICY_EFCTV_DT', 'N/A')),
+                "fault_rating": str(first_row.get('FAULT_RTG_DESC', 'N/A')),
+                "claim_owner": str(first_row.get('CLAIM_OWNR_EMPLY_NBR', 'N/A'))
+            }
+            
+            # Get all exposures for this claim
+            for _, row in exposure_rows.iterrows():
+                exposure = {
+                    "exposure_id": str(row.get('EXPSR_ID', 'N/A')),
+                    "exposure_number": str(row.get('EXPSR_NBR', 'N/A')),
+                    "coverage_type": str(row.get('CVRC_TYPE_DESC', 'N/A')),
+                    "coverage_subtype": str(row.get('CVRC_SBTYP_DESC', 'N/A')),
+                    "exposure_status": str(row.get('EXPSR_STTS_DESC', 'N/A')),
+                    "exposure_tier": str(row.get('EXPSR_TIER_DESC', 'N/A')),
+                    "claimant_type": str(row.get('CLMNT_TYPE_DESC', 'N/A')),
+                    "claimant_name": str(row.get('EXPSR_CLMNT_FIRST_NME', 'N/A')),
+                    "exposure_owner": str(row.get('EXPSR_OWNR_EMPLY_NBR', 'N/A')),
+                    "exposure_open_date": str(row.get('EXPSR_OPEN_DTM', 'N/A')),
+                    "exposure_closed_date": str(row.get('EXPSR_CLSD_DTM', 'N/A')),
+                    "loss_party_type": str(row.get('LOSS_PARTY_TYPE_DESC', 'N/A')),
+                    "subro_indicator": str(row.get('SUBRO_IND', 'N/A')),
+                    "siu_indicator": str(row.get('SIU_IND', 'N/A'))
+                }
+                exposures.append(exposure)
+    
     return jsonify({
         "claim_number": claim_number,
         "path": path,
-        "total_steps": len(path)
+        "total_steps": len(path),
+        "claim_info": claim_info,
+        "exposures": exposures
     })
 
 # --- Layout & Callbacks ---
@@ -894,35 +1136,22 @@ app.layout = html.Div([
     dcc.Store(id='data-change-trigger', data=0),
     dcc.Location(id='url', refresh=False),
     dcc.Location(id='url-refresh', refresh=True),
+    
+    # Header with navy blue background
     html.Div([
-        html.Div([
-            html.H1("WEA Claim Process Flow Dashboard", style={'textAlign': 'center', 'color': '#1A1446', 'margin': 0}),
-        ], style={'flex': 1}),
-        html.Div([
-            html.Label("Data Source:", style={
-                'marginRight': '10px', 
-                'fontWeight': '600', 
-                'color': '#1A1446',
-                'fontSize': '14px'
-            }),
-            dcc.Dropdown(
-                id='data-file-selector',
-                style={
-                    'width': '450px', 
-                    'display': 'inline-block',
-                    'fontSize': '13px'
-                },
-                clearable=False
-            ),
-        ], style={
-            'display': 'flex', 
-            'alignItems': 'center',
-            'backgroundColor': '#f8f9fa',
-            'padding': '12px 16px',
-            'borderRadius': '8px',
-            'border': '1px solid #e0e0e0'
-        })
-    ], className='header', style={'display': 'flex', 'justifyContent': 'space-between', 'alignItems': 'center', 'padding': '15px 0'}),
+        html.H1("WEA Claim Process Flow Dashboard", style={
+            'textAlign': 'center', 
+            'color': 'white', 
+            'margin': 0, 
+            'padding': '20px 0',
+            'fontSize': '32px',
+            'fontWeight': '600',
+            'letterSpacing': '0.5px'
+        }),
+    ], style={
+        'backgroundColor': '#1A1446',
+        'marginBottom': '20px'
+    }),
     
     dcc.Tabs(id="tabs", value='process-flow', children=[
         dcc.Tab(label='Process Flow', value='process-flow', 
@@ -934,10 +1163,7 @@ app.layout = html.Div([
         dcc.Tab(label='Claim View', value='claim-view',
                 style={'padding': '10px', 'fontWeight': 'bold'},
                 selected_style={'padding': '10px', 'fontWeight': 'bold', 'borderTop': '3px solid #FFD000', 'color': '#1A1446'}),
-        dcc.Tab(label='Upload Data', value='upload-data',
-                style={'padding': '10px', 'fontWeight': 'bold'},
-                selected_style={'padding': '10px', 'fontWeight': 'bold', 'borderTop': '3px solid #FFD000', 'color': '#1A1446'}),
-    ], style={'marginBottom': '20px'}),
+    ], style={'marginBottom': '15px'}),
     
     html.Div(id='tabs-content')
 ])
@@ -959,7 +1185,11 @@ def initialize_data_selector(_):
     if not os.path.exists(DATA_DIR):
         return [], None
     
-    files = [f for f in os.listdir(DATA_DIR) if f.endswith('.csv')]
+    # Exclude Snowflake/exposure data files
+    files = [
+        f for f in os.listdir(DATA_DIR) 
+        if f.endswith('.csv') and 'snowflake' not in f.lower() and f != 'sync_tracking.csv'
+    ]
     
     # Create friendly labels for each file
     options = []
@@ -979,9 +1209,53 @@ def initialize_data_selector(_):
             options.append({'label': f"Study {idx} ({filename})", 'value': filename})
     
     if current_data_file:
-        return options, current_data_file
+        # Return as list for multi-select
+        return options, [current_data_file] if isinstance(current_data_file, str) else current_data_file
     
-    return options, files[0] if files else None
+    # Return first file as list for multi-select
+    return options, [files[0]] if files else []
+
+@app.callback(
+    Output('selected-studies-display', 'children'),
+    [Input('data-file-selector', 'value')]
+)
+def update_selected_studies_display(selected_files):
+    """Display which studies are selected"""
+    if not selected_files:
+        return ""
+    
+    def format_study_name(filename):
+        """Extract clean study name from filename"""
+        # Remove .csv extension
+        name = filename.replace('.csv', '')
+        
+        # Check for pattern: simulated_claim_activities_X where X is number or name
+        if name.startswith('simulated_claim_activities_'):
+            study_part = name.replace('simulated_claim_activities_', '')
+            if study_part.isdigit():
+                return f"Study {study_part}"
+            return study_part
+        # Check if it's exactly 'simulated_claim_activities' without suffix
+        elif name == 'simulated_claim_activities':
+            return "Study 1"
+        # Otherwise return the name as-is (without .csv)
+        else:
+            return name
+    
+    if isinstance(selected_files, list):
+        if len(selected_files) == 0:
+            return ""
+        elif len(selected_files) == 1:
+            study_name = format_study_name(selected_files[0])
+            return f"Selected Study: {study_name}"
+        else:
+            # Multiple studies
+            study_names = [format_study_name(f) for f in selected_files]
+            return f"Selected Studies: {', '.join(study_names)}"
+    else:
+        # Single file selected (string)
+        study_name = format_study_name(selected_files)
+        return f"Selected Study: {study_name}"
 
 @app.callback(
     Output('data-change-trigger', 'data'),
@@ -1002,10 +1276,430 @@ def load_selected_data(filename, current_trigger):
     
     return current_trigger
 
+# Callbacks for Process Flow filters
+@app.callback(
+    [Output('filter-loss-state', 'options'),
+     Output('filter-loss-city', 'options'),
+     Output('filter-claim-owner', 'options'),
+     Output('filter-claim-seg', 'options'),
+     Output('filter-claim-tier', 'options'),
+     Output('filter-cat-ind', 'options'),
+     Output('filter-policy-state', 'options')],
+    [Input('tabs', 'value'),
+     Input('filter-loss-state', 'value'),
+     Input('filter-loss-city', 'value'),
+     Input('filter-claim-owner', 'value'),
+     Input('filter-claim-seg', 'value'),
+     Input('filter-claim-tier', 'value'),
+     Input('filter-cat-ind', 'value'),
+     Input('filter-policy-state', 'value')],
+    prevent_initial_call=False
+)
+def populate_filters(tab, loss_state, loss_city, claim_owner, claim_seg, claim_tier, cat_ind, policy_state):
+    """Populate filter dropdowns with cascading options based on selections."""
+    if tab != 'process-flow' or exposure_df is None:
+        return [], [], [], [], [], [], []
+    
+    try:
+        # Apply filters to get the current filtered dataset
+        temp_df = exposure_df.copy()
+        temp_df['CLAIM_OWNR_EMPLY_NBR'] = temp_df['CLAIM_OWNR_EMPLY_NBR'].astype(str)
+        
+        # Apply existing filters to create base filtered dataset
+        if loss_state:
+            temp_df = temp_df[temp_df['LOSS_ST_DESC'].isin(loss_state)]
+        if loss_city:
+            temp_df = temp_df[temp_df['LOSS_CITY_NME'].isin(loss_city)]
+        if claim_owner:
+            temp_df = temp_df[temp_df['CLAIM_OWNR_EMPLY_NBR'].isin(claim_owner)]
+        if claim_seg:
+            temp_df = temp_df[temp_df['CLAIM_SEG_DESC'].isin(claim_seg)]
+        if claim_tier:
+            temp_df = temp_df[temp_df['CLAIM_TIER_DESC'].isin(claim_tier)]
+        if cat_ind:
+            temp_df = temp_df[temp_df['CAT_IND'].isin(cat_ind)]
+        if policy_state:
+            temp_df = temp_df[temp_df['POLICY_ST_CD'].isin(policy_state)]
+        
+        # Loss State options - get from temp_df excluding current state filter
+        temp_state = exposure_df.copy()
+        temp_state['CLAIM_OWNR_EMPLY_NBR'] = temp_state['CLAIM_OWNR_EMPLY_NBR'].astype(str)
+        if loss_city:
+            temp_state = temp_state[temp_state['LOSS_CITY_NME'].isin(loss_city)]
+        if claim_owner:
+            temp_state = temp_state[temp_state['CLAIM_OWNR_EMPLY_NBR'].isin(claim_owner)]
+        if claim_seg:
+            temp_state = temp_state[temp_state['CLAIM_SEG_DESC'].isin(claim_seg)]
+        if claim_tier:
+            temp_state = temp_state[temp_state['CLAIM_TIER_DESC'].isin(claim_tier)]
+        if cat_ind:
+            temp_state = temp_state[temp_state['CAT_IND'].isin(cat_ind)]
+        if policy_state:
+            temp_state = temp_state[temp_state['POLICY_ST_CD'].isin(policy_state)]
+        loss_state_options = [{'label': x, 'value': x} for x in sorted(temp_state['LOSS_ST_DESC'].dropna().unique())]
+        
+        # Loss City options - get from temp_df excluding current city filter
+        temp_city = exposure_df.copy()
+        temp_city['CLAIM_OWNR_EMPLY_NBR'] = temp_city['CLAIM_OWNR_EMPLY_NBR'].astype(str)
+        if loss_state:
+            temp_city = temp_city[temp_city['LOSS_ST_DESC'].isin(loss_state)]
+        if claim_owner:
+            temp_city = temp_city[temp_city['CLAIM_OWNR_EMPLY_NBR'].isin(claim_owner)]
+        if claim_seg:
+            temp_city = temp_city[temp_city['CLAIM_SEG_DESC'].isin(claim_seg)]
+        if claim_tier:
+            temp_city = temp_city[temp_city['CLAIM_TIER_DESC'].isin(claim_tier)]
+        if cat_ind:
+            temp_city = temp_city[temp_city['CAT_IND'].isin(cat_ind)]
+        if policy_state:
+            temp_city = temp_city[temp_city['POLICY_ST_CD'].isin(policy_state)]
+        loss_city_options = [{'label': x, 'value': x} for x in sorted(temp_city['LOSS_CITY_NME'].dropna().unique())]
+        
+        # Claim Owner options - get from temp_df excluding current owner filter
+        temp_owner = exposure_df.copy()
+        temp_owner['CLAIM_OWNR_EMPLY_NBR'] = temp_owner['CLAIM_OWNR_EMPLY_NBR'].astype(str)
+        if loss_state:
+            temp_owner = temp_owner[temp_owner['LOSS_ST_DESC'].isin(loss_state)]
+        if loss_city:
+            temp_owner = temp_owner[temp_owner['LOSS_CITY_NME'].isin(loss_city)]
+        if claim_seg:
+            temp_owner = temp_owner[temp_owner['CLAIM_SEG_DESC'].isin(claim_seg)]
+        if claim_tier:
+            temp_owner = temp_owner[temp_owner['CLAIM_TIER_DESC'].isin(claim_tier)]
+        if cat_ind:
+            temp_owner = temp_owner[temp_owner['CAT_IND'].isin(cat_ind)]
+        if policy_state:
+            temp_owner = temp_owner[temp_owner['POLICY_ST_CD'].isin(policy_state)]
+        claim_owner_options = [{'label': x, 'value': x} for x in sorted(temp_owner['CLAIM_OWNR_EMPLY_NBR'].dropna().astype(str).unique())]
+        
+        # Claim Segment options - get from temp_df excluding current segment filter
+        temp_seg = exposure_df.copy()
+        temp_seg['CLAIM_OWNR_EMPLY_NBR'] = temp_seg['CLAIM_OWNR_EMPLY_NBR'].astype(str)
+        if loss_state:
+            temp_seg = temp_seg[temp_seg['LOSS_ST_DESC'].isin(loss_state)]
+        if loss_city:
+            temp_seg = temp_seg[temp_seg['LOSS_CITY_NME'].isin(loss_city)]
+        if claim_owner:
+            temp_seg = temp_seg[temp_seg['CLAIM_OWNR_EMPLY_NBR'].isin(claim_owner)]
+        if claim_tier:
+            temp_seg = temp_seg[temp_seg['CLAIM_TIER_DESC'].isin(claim_tier)]
+        if cat_ind:
+            temp_seg = temp_seg[temp_seg['CAT_IND'].isin(cat_ind)]
+        if policy_state:
+            temp_seg = temp_seg[temp_seg['POLICY_ST_CD'].isin(policy_state)]
+        claim_seg_options = [{'label': x, 'value': x} for x in sorted(temp_seg['CLAIM_SEG_DESC'].dropna().unique())]
+        
+        # Claim Tier options - get from temp_df excluding current tier filter
+        temp_tier = exposure_df.copy()
+        temp_tier['CLAIM_OWNR_EMPLY_NBR'] = temp_tier['CLAIM_OWNR_EMPLY_NBR'].astype(str)
+        if loss_state:
+            temp_tier = temp_tier[temp_tier['LOSS_ST_DESC'].isin(loss_state)]
+        if loss_city:
+            temp_tier = temp_tier[temp_tier['LOSS_CITY_NME'].isin(loss_city)]
+        if claim_owner:
+            temp_tier = temp_tier[temp_tier['CLAIM_OWNR_EMPLY_NBR'].isin(claim_owner)]
+        if claim_seg:
+            temp_tier = temp_tier[temp_tier['CLAIM_SEG_DESC'].isin(claim_seg)]
+        if cat_ind:
+            temp_tier = temp_tier[temp_tier['CAT_IND'].isin(cat_ind)]
+        if policy_state:
+            temp_tier = temp_tier[temp_tier['POLICY_ST_CD'].isin(policy_state)]
+        claim_tier_options = [{'label': x, 'value': x} for x in sorted(temp_tier['CLAIM_TIER_DESC'].dropna().unique())]
+        
+        # CAT Indicator options - get from temp_df excluding current cat filter
+        temp_cat = exposure_df.copy()
+        temp_cat['CLAIM_OWNR_EMPLY_NBR'] = temp_cat['CLAIM_OWNR_EMPLY_NBR'].astype(str)
+        if loss_state:
+            temp_cat = temp_cat[temp_cat['LOSS_ST_DESC'].isin(loss_state)]
+        if loss_city:
+            temp_cat = temp_cat[temp_cat['LOSS_CITY_NME'].isin(loss_city)]
+        if claim_owner:
+            temp_cat = temp_cat[temp_cat['CLAIM_OWNR_EMPLY_NBR'].isin(claim_owner)]
+        if claim_seg:
+            temp_cat = temp_cat[temp_cat['CLAIM_SEG_DESC'].isin(claim_seg)]
+        if claim_tier:
+            temp_cat = temp_cat[temp_cat['CLAIM_TIER_DESC'].isin(claim_tier)]
+        if policy_state:
+            temp_cat = temp_cat[temp_cat['POLICY_ST_CD'].isin(policy_state)]
+        cat_ind_options = [{'label': x, 'value': x} for x in sorted(temp_cat['CAT_IND'].dropna().unique())]
+        
+        # Policy State options - get from temp_df excluding current policy state filter
+        temp_policy = exposure_df.copy()
+        temp_policy['CLAIM_OWNR_EMPLY_NBR'] = temp_policy['CLAIM_OWNR_EMPLY_NBR'].astype(str)
+        if loss_state:
+            temp_policy = temp_policy[temp_policy['LOSS_ST_DESC'].isin(loss_state)]
+        if loss_city:
+            temp_policy = temp_policy[temp_policy['LOSS_CITY_NME'].isin(loss_city)]
+        if claim_owner:
+            temp_policy = temp_policy[temp_policy['CLAIM_OWNR_EMPLY_NBR'].isin(claim_owner)]
+        if claim_seg:
+            temp_policy = temp_policy[temp_policy['CLAIM_SEG_DESC'].isin(claim_seg)]
+        if claim_tier:
+            temp_policy = temp_policy[temp_policy['CLAIM_TIER_DESC'].isin(claim_tier)]
+        if cat_ind:
+            temp_policy = temp_policy[temp_policy['CAT_IND'].isin(cat_ind)]
+        policy_state_options = [{'label': x, 'value': x} for x in sorted(temp_policy['POLICY_ST_CD'].dropna().unique())]
+        
+        return loss_state_options, loss_city_options, claim_owner_options, claim_seg_options, claim_tier_options, cat_ind_options, policy_state_options
+    except Exception as e:
+        print(f"Error populating filters: {e}")
+        return [], [], [], [], [], [], []
+
+@app.callback(
+    [Output('filtered-claims-store', 'data'),
+     Output('filter-status', 'children')],
+    [Input('filter-loss-state', 'value'),
+     Input('filter-loss-city', 'value'),
+     Input('filter-claim-owner', 'value'),
+     Input('filter-claim-seg', 'value'),
+     Input('filter-claim-tier', 'value'),
+     Input('filter-cat-ind', 'value'),
+     Input('filter-policy-state', 'value')],
+    prevent_initial_call=False
+)
+def apply_filters(loss_state, loss_city, claim_owner, claim_seg, claim_tier, cat_ind, policy_state):
+    """Apply filters automatically when selections change."""
+    if exposure_df is None:
+        return None, "⚠ Exposure data not available"
+    
+    try:
+        # Start with all claims but only include those that exist in the flow data
+        if df is not None:
+            # Only keep exposure records for claims that exist in the flow data
+            valid_claims = df['Claim_Number'].unique()
+            filtered_df = exposure_df[exposure_df['CLAIM_NBR'].isin(valid_claims)].copy()
+        else:
+            filtered_df = exposure_df.copy()
+        
+        # Ensure CLAIM_OWNR_EMPLY_NBR is string type for comparison
+        filtered_df['CLAIM_OWNR_EMPLY_NBR'] = filtered_df['CLAIM_OWNR_EMPLY_NBR'].astype(str)
+        
+        # Apply filters
+        if loss_state:
+            filtered_df = filtered_df[filtered_df['LOSS_ST_DESC'].isin(loss_state)]
+        if loss_city:
+            filtered_df = filtered_df[filtered_df['LOSS_CITY_NME'].isin(loss_city)]
+        if claim_owner:
+            filtered_df = filtered_df[filtered_df['CLAIM_OWNR_EMPLY_NBR'].isin(claim_owner)]
+        if claim_seg:
+            filtered_df = filtered_df[filtered_df['CLAIM_SEG_DESC'].isin(claim_seg)]
+        if claim_tier:
+            filtered_df = filtered_df[filtered_df['CLAIM_TIER_DESC'].isin(claim_tier)]
+        if cat_ind:
+            filtered_df = filtered_df[filtered_df['CAT_IND'].isin(cat_ind)]
+        if policy_state:
+            filtered_df = filtered_df[filtered_df['POLICY_ST_CD'].isin(policy_state)]
+        
+        # Get unique claim numbers
+        claim_numbers = filtered_df['CLAIM_NBR'].unique().tolist()
+        
+        # Create status message - use actual flow data count as total
+        if df is not None:
+            total_claims = len(valid_claims)
+        else:
+            total_claims = exposure_df['CLAIM_NBR'].nunique()
+        filtered_count = len(claim_numbers)
+        
+        if not any([loss_state, loss_city, claim_owner, claim_seg, claim_tier, cat_ind, policy_state]):
+            status = f"Showing all {total_claims} claims"
+        else:
+            status = f"✓ Filtered to {filtered_count} of {total_claims} claims"
+        
+        return claim_numbers, status
+    except Exception as e:
+        return None, f"⚠ Error applying filters: {str(e)}"
+
+@app.callback(
+    Output('selected-filters-display', 'children'),
+    [Input('filter-loss-state', 'value'),
+     Input('filter-loss-city', 'value'),
+     Input('filter-claim-owner', 'value'),
+     Input('filter-claim-seg', 'value'),
+     Input('filter-claim-tier', 'value'),
+     Input('filter-cat-ind', 'value'),
+     Input('filter-policy-state', 'value')]
+)
+def display_selected_filters(loss_state, loss_city, claim_owner, claim_seg, claim_tier, cat_ind, policy_state):
+    """Display selected filters as badges."""
+    badges = []
+    
+    filter_data = [
+        ('Loss State', loss_state),
+        ('Loss City', loss_city),
+        ('Claim Owner', claim_owner),
+        ('Claim Segment', claim_seg),
+        ('Claim Tier', claim_tier),
+        ('CAT Indicator', cat_ind),
+        ('Policy State', policy_state)
+    ]
+    
+    for label, values in filter_data:
+        if values:
+            if isinstance(values, list):
+                for val in values:
+                    badges.append(
+                        html.Span(
+                            [f"{label}: {val}"],
+                            style={
+                                'display': 'inline-block',
+                                'backgroundColor': '#1A1446',
+                                'color': '#FFD000',
+                                'padding': '4px 10px',
+                                'borderRadius': '12px',
+                                'marginRight': '6px',
+                                'marginBottom': '4px',
+                                'fontSize': '11px',
+                                'fontWeight': '500'
+                            }
+                        )
+                    )
+            else:
+                badges.append(
+                    html.Span(
+                        [f"{label}: {values}"],
+                        style={
+                            'display': 'inline-block',
+                            'backgroundColor': '#1A1446',
+                            'color': '#FFD000',
+                            'padding': '4px 10px',
+                            'borderRadius': '12px',
+                            'marginRight': '6px',
+                            'marginBottom': '4px',
+                            'fontSize': '11px',
+                            'fontWeight': '500'
+                        }
+                    )
+                )
+    
+    if badges:
+        return html.Div([
+            html.Strong("Selected Filters: ", style={'marginRight': '8px', 'color': '#1A1446'}),
+            *badges
+        ])
+    return html.Div("No filters selected", style={'color': '#999', 'fontStyle': 'italic'})
+
+@app.callback(
+    [Output('filter-loss-state', 'value'),
+     Output('filter-loss-city', 'value'),
+     Output('filter-claim-owner', 'value'),
+     Output('filter-claim-seg', 'value'),
+     Output('filter-claim-tier', 'value'),
+     Output('filter-cat-ind', 'value'),
+     Output('filter-policy-state', 'value')],
+    [Input('clear-filters-btn', 'n_clicks')],
+    prevent_initial_call=True
+)
+def clear_filters(n_clicks):
+    """Clear all filter selections."""
+    return None, None, None, None, None, None, None
+
 @app.callback(Output('tabs-content', 'children'), Input('tabs', 'value'))
 def render_content(tab):
+    # Data source selector - shown on all tabs
+    data_selector = html.Div([
+        html.Label("Data Source:", style={
+            'marginRight': '10px', 
+            'fontWeight': '600', 
+            'color': '#1A1446',
+            'fontSize': '13px'
+        }),
+        dcc.Dropdown(
+            id='data-file-selector',
+            style={
+                'minWidth': '500px',
+                'maxWidth': '700px',
+                'display': 'inline-block',
+                'fontSize': '12px'
+            },
+            multi=True,
+            clearable=False,
+            placeholder="Select one or more data sources..."
+        ),
+        html.Div(id='selected-studies-display', style={
+            'marginLeft': '15px',
+            'fontSize': '12px',
+            'color': '#666',
+            'fontStyle': 'italic'
+        })
+    ], style={
+        'display': 'flex', 
+        'alignItems': 'center',
+        'backgroundColor': '#f8f9fa',
+        'padding': '10px 16px',
+        'borderRadius': '6px',
+        'border': '1px solid #e0e0e0',
+        'marginBottom': '15px'
+    })
+    
     if tab == 'process-flow':
         return html.Div([
+            data_selector,
+            # Filters section
+            html.Div([
+                html.Div([
+                    html.Label("Filters:", style={'fontWeight': 'bold', 'color': '#1A1446', 'marginRight': '15px', 'fontSize': '14px', 'minWidth': '60px'}),
+                    dcc.Dropdown(
+                        id='filter-loss-state', 
+                        multi=True, 
+                        placeholder='Loss State', 
+                        style={'width': '160px', 'marginRight': '6px', 'fontSize': '15px'},
+                        optionHeight=30
+                    ),
+                    dcc.Dropdown(
+                        id='filter-loss-city', 
+                        multi=True, 
+                        placeholder='Loss City', 
+                        style={'width': '160px', 'marginRight': '6px', 'fontSize': '11px'},
+                        optionHeight=30
+                    ),
+                    dcc.Dropdown(
+                        id='filter-claim-owner', 
+                        multi=True, 
+                        placeholder='Claim Owner', 
+                        style={'width': '140px', 'marginRight': '6px', 'fontSize': '11px'},
+                        optionHeight=30
+                    ),
+                    dcc.Dropdown(
+                        id='filter-claim-seg', 
+                        multi=True, 
+                        placeholder='Claim Seg', 
+                        style={'width': '160px', 'marginRight': '6px', 'fontSize': '11px'},
+                        optionHeight=30
+                    ),
+                    dcc.Dropdown(
+                        id='filter-claim-tier', 
+                        multi=True, 
+                        placeholder='Claim Tier', 
+                        style={'width': '175px', 'marginRight': '6px', 'fontSize': '11px'},
+                        optionHeight=30
+                    ),
+                    dcc.Dropdown(
+                        id='filter-cat-ind', 
+                        multi=True, 
+                        placeholder='CAT', 
+                        style={'width': '100px', 'marginRight': '6px', 'fontSize': '11px'},
+                        optionHeight=30
+                    ),
+                    dcc.Dropdown(
+                        id='filter-policy-state', 
+                        multi=True, 
+                        placeholder='Policy State', 
+                        style={'width': '160px', 'marginRight': '6px', 'fontSize': '11px'},
+                        optionHeight=30
+                    ),
+                    html.Button('Clear All', id='clear-filters-btn', n_clicks=0, style={'padding': '6px 16px', 'backgroundColor': '#6c757d', 'color': 'white', 'border': 'none', 'borderRadius': '4px', 'cursor': 'pointer', 'fontSize': '11px', 'fontWeight': '600', 'boxShadow': '0 2px 4px rgba(0,0,0,0.1)'}),
+                ], style={'display': 'flex', 'alignItems': 'center', 'flexWrap': 'nowrap', 'gap': '0px', 'marginBottom': '8px'}),
+                
+                # Selected filters display
+                html.Div(id='selected-filters-display', style={'marginTop': '10px', 'fontSize': '12px', 'color': '#444'}),
+                
+                # Filter status
+                html.Div(id='filter-status', style={'marginTop': '8px', 'fontSize': '12px', 'color': '#666', 'fontStyle': 'italic'})
+            ], style={'backgroundColor': '#f8f9fa', 'padding': '15px', 'borderRadius': '8px', 'marginBottom': '15px', 'border': '1px solid #e0e0e0'}),
+            
+            # Store for filtered claims
+            dcc.Store(id='filtered-claims-store'),
+            
             html.Div(id='stats', className='stats-bar', style={'display': 'none'}),
             html.Div([
                 html.Div(className='spinner'),
@@ -1022,6 +1716,7 @@ def render_content(tab):
         ], className='container')
     elif tab == 'activity-flow':
         return html.Div([
+            data_selector,
             html.Div(id='stats', className='stats-bar', style={'display': 'none'}),
             html.Div([
                 html.Div(className='spinner'),
@@ -1039,9 +1734,10 @@ def render_content(tab):
         ], className='container')
     elif tab == 'claim-view':
         return html.Div([
+            data_selector,
             html.Div([
                 html.Div([
-                    dcc.Input(id='claimInput', type='number', placeholder='Enter Claim Number (e.g., 40043585)', list='claimList', style={'padding': '10px', 'width': '300px', 'marginRight': '10px'}),
+                    dcc.Input(id='claimInput', type='text', placeholder='Enter Claim Number (e.g., 40043585)', list='claimList', style={'padding': '10px', 'width': '300px', 'marginRight': '10px'}),
                     html.Datalist(id='claimList'),
                     html.Button('Search', id='searchBtn', n_clicks=0, style={'padding': '10px 20px', 'backgroundColor': '#1A1446', 'color': '#FFD000', 'border': 'none', 'borderRadius': '5px', 'cursor': 'pointer'}),
                 ], className='search-box', style={'display': 'flex', 'justifyContent': 'center', 'marginBottom': '20px'}),
@@ -1066,35 +1762,36 @@ def render_content(tab):
                         html.Div([
                             html.H3("Analysis", style={'color': '#1A1446', 'marginBottom': '15px', 'borderBottom': '2px solid #eee', 'paddingBottom': '10px'}),
                             html.Div(id='process-analysis', style={'marginBottom': '30px'}),
-                            html.Div(id='activity-analysis')
+                            html.Div(id='activity-analysis', style={'marginBottom': '30px'}),
+                            html.Div(id='claim-info-section', style={'marginTop': '30px', 'padding': '15px', 'background': '#f8f9fa', 'borderRadius': '8px'})
                         ], style={'flex': '1', 'paddingLeft': '20px', 'borderLeft': '1px solid #e0e0e0', 'backgroundColor': '#fcfcfc', 'borderRadius': '8px', 'padding': '20px'})
                     ], style={'display': 'flex', 'flexDirection': 'row', 'gap': '20px'})
                 ])
             ], className='container')
         ])
-    elif tab == 'upload-data':
-        return html.Div([
-            dcc.Upload(
-                id='upload-data',
-                children=html.Div([
-                    'Drag and Drop or ',
-                    html.A('Select Files')
-                ]),
-                style={
-                    'width': '100%',
-                    'height': '60px',
-                    'lineHeight': '60px',
-                    'borderWidth': '1px',
-                    'borderStyle': 'dashed',
-                    'borderRadius': '5px',
-                    'textAlign': 'center',
-                    'margin': '10px'
-                },
-                # Allow multiple files to be uploaded
-                multiple=False
-            ),
-            html.Div(id='output-data-upload'),
-        ], className='container')
+
+# Clientside callback to apply filters to Process Flow
+clientside_callback(
+    """
+    function(filteredClaims, tab) {
+        if (tab === 'process-flow' && window.ProcessFlow) {
+            console.log('Applying filter with', filteredClaims ? filteredClaims.length : 'all', 'claims');
+            setTimeout(function() {
+                if (filteredClaims) {
+                    window.ProcessFlow.setFilteredClaims(filteredClaims);
+                } else {
+                    window.ProcessFlow.setFilteredClaims(null);
+                }
+                window.ProcessFlow.init(true);
+            }, 100);
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('filtered-claims-store', 'id'),
+    Input('filtered-claims-store', 'data'),
+    State('tabs', 'value')
+)
 
 clientside_callback(
     """
@@ -1130,7 +1827,7 @@ clientside_callback(
     function(trigger, tab) {
         if (trigger > 0) {
             setTimeout(function() {
-                console.log("Data changed, refreshing", tab);
+                console.log("Data changed (trigger:", trigger, "), refreshing", tab);
                 if (tab === 'process-flow' && window.ProcessFlow) {
                     window.ProcessFlow.init(true);
                 } else if (tab === 'activity-flow' && window.ActivityFlow) {
@@ -1138,7 +1835,7 @@ clientside_callback(
                 } else if (tab === 'claim-view' && window.ClaimView) {
                     window.ClaimView.init();
                 }
-            }, 500);
+            }, 800);
         }
         return window.dash_clientside.no_update;
     }

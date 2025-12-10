@@ -102,9 +102,7 @@ window.ClaimView = (function () {
         }
 
         try {
-            const response = await fetch(`/api/claim-path/${claimNumber}?mode=${viewMode}`);
-
-            if (!response.ok) {
+            const response = await fetch(`/api/claim-path/${claimNumber}?mode=${viewMode}`); if (!response.ok) {
                 if (response.status === 404) {
                     throw new Error('Claim not found');
                 }
@@ -579,12 +577,19 @@ window.ClaimView = (function () {
                         <div class="activity-stats">
                              <span class="duration-badge">⏱️ ${step.active_minutes.toFixed(2)} min</span>
                         </div>
-                        <div class="duration-bar-container" title="Duration">
+                        <div class="duration-bar-container" title="Activity duration (${step.active_minutes.toFixed(2)} min) shown relative to the longest phase in this claim">
                             <div class="duration-bar" style="width: ${Math.min(100, (step.active_minutes / maxProcessDuration) * 100 * 1.5)}%; ${activityBarStyle}"></div>
                         </div>
                     </div>
                 `;
             });
+
+            // Add explanation text for the first item only
+            const explanationHtml = index === 0 ? `
+                <div style="font-size: 0.75em; color: #666; font-style: italic; margin-top: 4px; padding: 4px 8px; background: #f8f9fa; border-radius: 4px; border-left: 3px solid #FFD000;">
+                    ℹ️ Progress bars show duration relative to the longest phase (hover for details)
+                </div>
+            ` : '';
 
             item.innerHTML = `
                 <div class="timeline-marker" style="${markerStyle}"></div>
@@ -594,9 +599,10 @@ window.ClaimView = (function () {
                             <div class="process-name" style="${processTextStyle}">${group.process}</div>
                             <div class="process-total-duration">Total: ${group.totalDuration.toFixed(2)} min</div>
                         </div>
-                        <div class="process-duration-bar-container" title="Total process duration">
+                        <div class="process-duration-bar-container" title="Progress bar shows total time spent in this phase (${group.totalDuration.toFixed(2)} min) relative to the longest phase (${maxProcessDuration.toFixed(2)} min)">
                             <div class="process-duration-bar" style="width: ${processPercentage}%; ${processColorStyle}"></div>
                         </div>
+                        ${explanationHtml}
                     </div>
                     <div class="activity-list">
                         ${activitiesHtml}
@@ -606,6 +612,9 @@ window.ClaimView = (function () {
 
             timeline.appendChild(item);
         });
+
+        // Add hover tooltips for progress bars
+        addProgressBarTooltips();
 
         // --- Right Side Analysis ---
 
@@ -696,7 +705,384 @@ window.ClaimView = (function () {
         activityHtml += '</div>';
         if (activityAnalysis) activityAnalysis.innerHTML = activityHtml;
 
+        // 3. Claim Information Section (if available)
+        if (data.claim_info) {
+            renderClaimInfo(data.claim_info, data.exposures);
+        }
+
         if (resultsArea) resultsArea.style.display = 'block';
+    }
+
+    function renderClaimInfo(info, exposures) {
+        const claimInfoDiv = document.getElementById('claim-info-section');
+        if (!claimInfoDiv) return;
+
+        const createInfoCard = (title, items) => {
+            const itemsHtml = items.map(item => {
+                if (!item.value || item.value === 'N/A' || item.value === 'nan') return '';
+                return `
+                    <div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid #f0f0f0;">
+                        <span style="color:#666; font-size:0.85em;">${item.label}</span>
+                        <span style="color:#1A1446; font-weight:600; font-size:0.85em;">${item.value}</span>
+                    </div>
+                `;
+            }).join('');
+
+            if (!itemsHtml) return '';
+
+            return `
+                <div style="background:white; border-radius:8px; padding:12px; border:1px solid #e0e0e0; min-width:200px;">
+                    <h4 style="color:#1A1446; margin:0 0 10px 0; font-size:0.9em; font-weight:700; border-bottom:2px solid #FFD000; padding-bottom:6px;">${title}</h4>
+                    ${itemsHtml}
+                </div>
+            `;
+        };
+
+        const claimDetails = createInfoCard('Claim Details', [
+            { label: 'Status', value: info.claim_status },
+            { label: 'Segment', value: info.claim_segment },
+            { label: 'Tier', value: info.claim_tier },
+            { label: 'Owner', value: info.claim_owner },
+            { label: 'Reported', value: info.claim_reported_date },
+            { label: 'Opened', value: info.claim_open_date },
+            { label: 'Closed', value: info.claim_closed_date }
+        ]);
+
+        const lossDetails = createInfoCard('Loss Information', [
+            { label: 'Loss Date', value: info.loss_date },
+            { label: 'Loss Type', value: info.loss_type },
+            { label: 'Location', value: `${info.loss_city}, ${info.loss_state}` },
+            { label: 'Fault Rating', value: info.fault_rating },
+            { label: 'CAT Indicator', value: info.cat_indicator }
+        ]);
+
+        const policyDetails = createInfoCard('Policy Information', [
+            { label: 'Policy #', value: info.policy_number },
+            { label: 'Policy State', value: info.policy_state },
+            { label: 'Effective Date', value: info.policy_effective_date }
+        ]);
+
+        // Render exposures
+        let exposuresHtml = '';
+        if (exposures && exposures.length > 0) {
+            exposuresHtml = exposures.map((exp, index) => {
+                return `
+                    <div style="background:white; border-radius:8px; padding:12px; border:1px solid #e0e0e0; min-width:200px;">
+                        <h4 style="color:#1A1446; margin:0 0 10px 0; font-size:0.9em; font-weight:700; border-bottom:2px solid #FFD000; padding-bottom:6px;">
+                            Exposure ${index + 1} ${exp.exposure_number !== 'N/A' ? '(' + exp.exposure_number + ')' : ''}
+                        </h4>
+                        ${[
+                        { label: 'Coverage', value: exp.coverage_type },
+                        { label: 'Sub-Type', value: exp.coverage_subtype },
+                        { label: 'Status', value: exp.exposure_status },
+                        { label: 'Tier', value: exp.exposure_tier },
+                        { label: 'Claimant Type', value: exp.claimant_type },
+                        { label: 'Claimant', value: exp.claimant_name },
+                        { label: 'Party Type', value: exp.loss_party_type },
+                        { label: 'Owner', value: exp.exposure_owner },
+                        { label: 'Opened', value: exp.exposure_open_date.split('T')[0] },
+                        { label: 'Closed', value: exp.exposure_closed_date !== 'N/A' ? exp.exposure_closed_date.split('T')[0] : 'N/A' },
+                        { label: 'SUBRO', value: exp.subro_indicator },
+                        { label: 'SIU', value: exp.siu_indicator }
+                    ].filter(item => item.value && item.value !== 'N/A' && item.value !== 'nan').map(item => `
+                            <div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid #f0f0f0;">
+                                <span style="color:#666; font-size:0.85em;">${item.label}</span>
+                                <span style="color:#1A1446; font-weight:600; font-size:0.85em;">${item.value}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        claimInfoDiv.innerHTML = `
+            <div style="background:white; border-radius:12px; padding:20px; border:1px solid #e0e0e0; box-shadow:0 2px 8px rgba(0,0,0,0.1);">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                    <h4 style="color:#1A1446; margin:0; font-size:1.1em; font-weight:700;">Claim Information</h4>
+                    <div style="display:flex; gap:8px;">
+                        <button onclick="window.ClaimView.viewFullClaimDetails()" style="background:#1A1446; color:#FFD000; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-size:0.85em; font-weight:600; display:flex; align-items:center; gap:6px;">
+                            <span>📋</span> View Details
+                        </button>
+                        <button onclick="window.ClaimView.downloadClaimPDF()" style="background:#FFD000; color:#1A1446; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-size:0.85em; font-weight:600; display:flex; align-items:center; gap:6px;">
+                            <span>📥</span> Download PDF
+                        </button>
+                    </div>
+                </div>
+                
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); gap:12px; margin-bottom:16px;">
+                    ${claimDetails}
+                    ${lossDetails}
+                    ${policyDetails}
+                </div>
+                
+                ${exposures && exposures.length > 0 ? `
+                    <div style="border-top:2px solid #f0f0f0; padding-top:16px; margin-top:16px;">
+                        <h4 style="color:#1A1446; margin:0 0 12px 0; font-size:1em; font-weight:700;">
+                            Exposures <span style="background:#1A1446; color:#FFD000; padding:2px 8px; border-radius:10px; font-size:0.8em; margin-left:8px;">${exposures.length}</span>
+                        </h4>
+                        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); gap:12px;">
+                            ${exposuresHtml}
+                        </div>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+
+        // Store the data for popup and PDF
+        window.currentClaimData = { info, exposures };
+    }
+
+    function viewFullClaimDetails() {
+        const data = window.currentClaimData;
+        if (!data) return;
+
+        const modal = document.createElement('div');
+        modal.id = 'claim-details-modal';
+        modal.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        `;
+
+        const modalContent = document.createElement('div');
+        modalContent.style.cssText = `
+            background: white;
+            border-radius: 12px;
+            max-width: 1200px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        `;
+
+        modalContent.innerHTML = `
+            <div style="position:sticky; top:0; background:white; border-bottom:2px solid #e0e0e0; padding:20px; z-index:1;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <h2 style="color:#1A1446; margin:0; font-size:1.5em;">Claim ${data.info.claim_number} - Complete Details</h2>
+                    <button onclick="document.getElementById('claim-details-modal').remove()" style="background:#dc3545; color:white; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-weight:600;">
+                        ✕ Close
+                    </button>
+                </div>
+            </div>
+            
+            <div style="padding:20px;">
+                ${generateFullClaimHTML(data.info, data.exposures)}
+            </div>
+        `;
+
+        modal.appendChild(modalContent);
+        document.body.appendChild(modal);
+
+        // Close on background click
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.remove();
+            }
+        });
+    }
+
+    function generateFullClaimHTML(info, exposures) {
+        const sections = [];
+
+        // Claim Details Section
+        sections.push(`
+            <div style="background:#f8f9fa; border-radius:8px; padding:16px; margin-bottom:16px;">
+                <h3 style="color:#1A1446; margin:0 0 12px 0; border-bottom:2px solid #FFD000; padding-bottom:8px;">Claim Details</h3>
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); gap:12px;">
+                    ${createDetailRow('Claim Number', info.claim_number)}
+                    ${createDetailRow('Status', info.claim_status)}
+                    ${createDetailRow('Segment', info.claim_segment)}
+                    ${createDetailRow('Tier', info.claim_tier)}
+                    ${createDetailRow('Owner', info.claim_owner)}
+                    ${createDetailRow('Reported Date', info.claim_reported_date)}
+                    ${createDetailRow('Open Date', info.claim_open_date)}
+                    ${createDetailRow('Closed Date', info.claim_closed_date)}
+                </div>
+            </div>
+        `);
+
+        // Loss Information Section
+        sections.push(`
+            <div style="background:#f8f9fa; border-radius:8px; padding:16px; margin-bottom:16px;">
+                <h3 style="color:#1A1446; margin:0 0 12px 0; border-bottom:2px solid #FFD000; padding-bottom:8px;">Loss Information</h3>
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); gap:12px;">
+                    ${createDetailRow('Loss Date', info.loss_date)}
+                    ${createDetailRow('Loss Type', info.loss_type)}
+                    ${createDetailRow('Loss City', info.loss_city)}
+                    ${createDetailRow('Loss State', info.loss_state)}
+                    ${createDetailRow('Fault Rating', info.fault_rating)}
+                    ${createDetailRow('CAT Indicator', info.cat_indicator)}
+                </div>
+            </div>
+        `);
+
+        // Policy Information Section
+        sections.push(`
+            <div style="background:#f8f9fa; border-radius:8px; padding:16px; margin-bottom:16px;">
+                <h3 style="color:#1A1446; margin:0 0 12px 0; border-bottom:2px solid #FFD000; padding-bottom:8px;">Policy Information</h3>
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); gap:12px;">
+                    ${createDetailRow('Policy Number', info.policy_number)}
+                    ${createDetailRow('Policy State', info.policy_state)}
+                    ${createDetailRow('Effective Date', info.policy_effective_date)}
+                </div>
+            </div>
+        `);
+
+        // Exposures Section
+        if (exposures && exposures.length > 0) {
+            const exposuresHTML = exposures.map((exp, index) => `
+                <div style="background:white; border-radius:8px; padding:16px; border:1px solid #e0e0e0; margin-bottom:12px;">
+                    <h4 style="color:#1A1446; margin:0 0 12px 0; border-bottom:2px solid #FFD000; padding-bottom:8px;">
+                        Exposure ${index + 1} ${exp.exposure_number !== 'N/A' ? '(' + exp.exposure_number + ')' : ''}
+                    </h4>
+                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); gap:12px;">
+                        ${createDetailRow('Exposure ID', exp.exposure_id)}
+                        ${createDetailRow('Coverage Type', exp.coverage_type)}
+                        ${createDetailRow('Coverage Sub-Type', exp.coverage_subtype)}
+                        ${createDetailRow('Status', exp.exposure_status)}
+                        ${createDetailRow('Tier', exp.exposure_tier)}
+                        ${createDetailRow('Claimant Type', exp.claimant_type)}
+                        ${createDetailRow('Claimant Name', exp.claimant_name)}
+                        ${createDetailRow('Loss Party Type', exp.loss_party_type)}
+                        ${createDetailRow('Owner', exp.exposure_owner)}
+                        ${createDetailRow('Opened', exp.exposure_open_date.split('T')[0])}
+                        ${createDetailRow('Closed', exp.exposure_closed_date !== 'N/A' ? exp.exposure_closed_date.split('T')[0] : 'N/A')}
+                        ${createDetailRow('SUBRO Indicator', exp.subro_indicator)}
+                        ${createDetailRow('SIU Indicator', exp.siu_indicator)}
+                    </div>
+                </div>
+            `).join('');
+
+            sections.push(`
+                <div style="background:#f8f9fa; border-radius:8px; padding:16px;">
+                    <h3 style="color:#1A1446; margin:0 0 12px 0; border-bottom:2px solid #FFD000; padding-bottom:8px;">
+                        Exposures <span style="background:#1A1446; color:#FFD000; padding:2px 8px; border-radius:10px; font-size:0.8em; margin-left:8px;">${exposures.length}</span>
+                    </h3>
+                    ${exposuresHTML}
+                </div>
+            `);
+        }
+
+        return sections.join('');
+    }
+
+    function createDetailRow(label, value) {
+        if (!value || value === 'N/A' || value === 'nan') return '';
+        return `
+            <div style="background:white; padding:8px; border-radius:4px;">
+                <div style="color:#666; font-size:0.8em; margin-bottom:4px;">${label}</div>
+                <div style="color:#1A1446; font-weight:600;">${value}</div>
+            </div>
+        `;
+    }
+
+    function downloadClaimPDF() {
+        const data = window.currentClaimData;
+        if (!data) return;
+
+        const claimNumber = data.info.claim_number;
+        const htmlContent = generateFullClaimHTML(data.info, data.exposures);
+
+        // Create a printable window
+        const printWindow = window.open('', '_blank');
+        printWindow.document.write(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Claim ${claimNumber}</title>
+                <style>
+                    body {
+                        font-family: Arial, sans-serif;
+                        padding: 20px;
+                        max-width: 1200px;
+                        margin: 0 auto;
+                    }
+                    h2 {
+                        color: #1A1446;
+                        border-bottom: 3px solid #FFD000;
+                        padding-bottom: 10px;
+                    }
+                    @media print {
+                        button { display: none; }
+                    }
+                </style>
+            </head>
+            <body>
+                <h2>Claim ${claimNumber} - Complete Details</h2>
+                ${htmlContent}
+                <div style="margin-top:20px; text-align:center;">
+                    <button onclick="window.print()" style="background:#1A1446; color:#FFD000; border:none; padding:12px 24px; border-radius:6px; cursor:pointer; font-size:1em; font-weight:600;">
+                        🖨️ Print / Save as PDF
+                    </button>
+                </div>
+            </body>
+            </html>
+        `);
+        printWindow.document.close();
+    }
+
+    function addProgressBarTooltips() {
+        // Create a tooltip element if it doesn't exist
+        let tooltip = document.getElementById('progress-tooltip');
+        if (!tooltip) {
+            tooltip = document.createElement('div');
+            tooltip.id = 'progress-tooltip';
+            tooltip.style.cssText = `
+                position: fixed;
+                background: rgba(26, 20, 70, 0.95);
+                color: white;
+                padding: 8px 12px;
+                border-radius: 6px;
+                font-size: 12px;
+                z-index: 10000;
+                pointer-events: none;
+                display: none;
+                max-width: 300px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+                border: 1px solid rgba(255, 208, 0, 0.3);
+            `;
+            document.body.appendChild(tooltip);
+        }
+
+        // Add event listeners to all progress bar containers
+        const progressBars = document.querySelectorAll('.process-duration-bar-container, .duration-bar-container');
+
+        progressBars.forEach(bar => {
+            bar.addEventListener('mouseenter', function (e) {
+                const tooltipText = this.getAttribute('title');
+                if (tooltipText) {
+                    tooltip.textContent = tooltipText;
+                    tooltip.style.display = 'block';
+                    // Remove the title attribute to prevent default tooltip
+                    this.setAttribute('data-title', tooltipText);
+                    this.removeAttribute('title');
+                }
+            });
+
+            bar.addEventListener('mousemove', function (e) {
+                if (tooltip.style.display === 'block') {
+                    tooltip.style.left = (e.clientX + 10) + 'px';
+                    tooltip.style.top = (e.clientY + 10) + 'px';
+                }
+            });
+
+            bar.addEventListener('mouseleave', function () {
+                tooltip.style.display = 'none';
+                // Restore the title attribute
+                const titleText = this.getAttribute('data-title');
+                if (titleText) {
+                    this.setAttribute('title', titleText);
+                }
+            });
+        });
     }
 
     function showError(message) {
@@ -708,7 +1094,9 @@ window.ClaimView = (function () {
     }
 
     return {
-        init: init
+        init: init,
+        viewFullClaimDetails: viewFullClaimDetails,
+        downloadClaimPDF: downloadClaimPDF
     };
 
 })();

@@ -1,2 +1,3 @@
 *env/*
 *.pyc
+dash_dashboard/data/dummy_snowflake_data.csv
