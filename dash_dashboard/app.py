@@ -236,8 +236,7 @@ if SNOWFLAKE_ENABLED:
             if sync_info:
                 print(f"\n✓ Snowflake sync completed successfully")
                 print(f"  Last sync: {sync_info['last_sync_timestamp']}")
-                print(f"  Total claims: {sync_info['total_claims']}")
-                print(f"  New claims added: {sync_info['new_claims_added']}")
+                print(f"  Claims synced: {sync_info.get('claims_synced', sync_info.get('total_claims', 0))}")
         else:
             print("\n⚠ Snowflake sync encountered issues, using existing data")
     except Exception as e:

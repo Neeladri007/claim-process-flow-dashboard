@@ -14,6 +14,92 @@ FULL_DATA_FILE = os.path.join(DATA_DIR, "claim_activities_full.csv")
 SYNC_TRACKING_FILE = os.path.join(DATA_DIR, "sync_tracking.csv")
 
 
+def get_claim_numbers_from_process_data():
+    """
+    Get list of claim numbers from local process data files.
+    Excludes Snowflake exposure data files.
+    
+    Returns:
+        set: Set of claim numbers from process data
+    """
+    if not os.path.exists(DATA_DIR):
+        print(f"Data directory not found: {DATA_DIR}")
+        return set()
+    
+    # Get all CSV files excluding Snowflake/exposure data
+    process_files = [
+        f for f in os.listdir(DATA_DIR) 
+        if f.endswith('.csv') 
+        and 'snowflake' not in f.lower() 
+        and 'sync_tracking' not in f.lower()
+        and 'dummy_snowflake' not in f.lower()
+        and 'claim_activities_full' not in f.lower()
+    ]
+    
+    all_claims = set()
+    
+    for filename in process_files:
+        try:
+            filepath = os.path.join(DATA_DIR, filename)
+            df = pd.read_csv(filepath, dtype={'Claim_Number': str})
+            
+            if 'Claim_Number' in df.columns:
+                # Ensure claim numbers have leading zero
+                claims = df['Claim_Number'].apply(
+                    lambda x: x if str(x).startswith('0') else '0' + str(x)
+                ).unique()
+                all_claims.update(claims)
+                print(f"Found {len(claims)} unique claims in {filename}")
+        except Exception as e:
+            print(f"Error reading {filename}: {e}")
+    
+    print(f"Total unique claims across all process data files: {len(all_claims)}")
+    return all_claims
+
+
+def get_claim_numbers_from_process_data():
+    """
+    Get list of claim numbers from local process data files.
+    Excludes Snowflake exposure data files.
+    
+    Returns:
+        set: Set of claim numbers from process data
+    """
+    if not os.path.exists(DATA_DIR):
+        print(f"Data directory not found: {DATA_DIR}")
+        return set()
+    
+    # Get all CSV files excluding Snowflake/exposure data
+    process_files = [
+        f for f in os.listdir(DATA_DIR) 
+        if f.endswith('.csv') 
+        and 'snowflake' not in f.lower() 
+        and 'sync_tracking' not in f.lower()
+        and 'dummy_snowflake' not in f.lower()
+        and 'claim_activities_full' not in f.lower()
+    ]
+    
+    all_claims = set()
+    
+    for filename in process_files:
+        try:
+            filepath = os.path.join(DATA_DIR, filename)
+            df = pd.read_csv(filepath, dtype={'Claim_Number': str})
+            
+            if 'Claim_Number' in df.columns:
+                # Ensure claim numbers have leading zero
+                claims = df['Claim_Number'].apply(
+                    lambda x: x if str(x).startswith('0') else '0' + str(x)
+                ).unique()
+                all_claims.update(claims)
+                print(f"Found {len(claims)} unique claims in {filename}")
+        except Exception as e:
+            print(f"Error reading {filename}: {e}")
+    
+    print(f"Total unique claims across all process data files: {len(all_claims)}")
+    return all_claims
+
+
 def get_snowflake_connection():
     """
     Establish connection to Snowflake using credentials from config.
@@ -155,10 +241,10 @@ def transform_snowflake_data_to_claims_format(df):
 def sync_claims_data(force_full_refresh=False):
     """
     Synchronize claims data from Snowflake to local CSV.
-    On first run, fetches all claims. On subsequent runs, only fetches new claims.
+    Only fetches exposure data for claims that exist in local process data files.
     
     Args:
-        force_full_refresh (bool): If True, fetches all data regardless of existing data
+        force_full_refresh (bool): If True, re-fetches all data for existing claims
     
     Returns:
         bool: True if sync was successful, False otherwise
@@ -169,100 +255,42 @@ def sync_claims_data(force_full_refresh=False):
         print(f"Created data directory: {DATA_DIR}")
     
     try:
-        if force_full_refresh or not os.path.exists(FULL_DATA_FILE):
-            # Full refresh - fetch all claims
-            print("Performing full data sync from Snowflake...")
-            raw_df = fetch_claims_from_snowflake()
-            
-            if raw_df is None or raw_df.empty:
-                print("No data fetched from Snowflake")
-                return False
-            
-            # Transform data
-            claims_df = transform_snowflake_data_to_claims_format(raw_df)
-            
-            # Save to CSV
-            claims_df.to_csv(FULL_DATA_FILE, index=False)
-            print(f"Saved {len(claims_df)} records to {FULL_DATA_FILE}")
-            
-            # Update sync tracking
-            update_sync_tracking(len(claims_df['Claim_Number'].unique()))
-            
-            return True
+        # Get claim numbers from process data files
+        print("Reading claim numbers from process data files...")
+        process_claims = get_claim_numbers_from_process_data()
         
-        else:
-            # Incremental sync - only fetch new claims
-            print("Checking for new claims...")
-            existing_claims = get_existing_claim_numbers()
-            print(f"Found {len(existing_claims)} existing claims in local data")
-            
-            # TODO: Get list of all claim numbers from Snowflake to compare
-            # For now, we'll assume you have a way to get the full list
-            # This could be a separate lightweight query
-            
-            # Placeholder: Get all claim numbers from Snowflake
-            conn = get_snowflake_connection()
-            if conn is None:
-                return False
-            
-            try:
-                # Query to get all claim numbers (lightweight)
-                all_claims_query = """
-                SELECT DISTINCT CLAIM_NBR
-                FROM "PL_PROD"."PM_EDW_PRES_CL_D"."LD_CLAIM_V"
-                WHERE DM_CRRNT_ROW_IND = 'Y';
-                """
-                all_claims_df = pd.read_sql(all_claims_query, conn)
-                all_claims_df['CLAIM_NBR'] = all_claims_df['CLAIM_NBR'].astype(str).apply(
-                    lambda x: x if x.startswith('0') else '0' + x
-                )
-                all_claims_in_snowflake = set(all_claims_df['CLAIM_NBR'].tolist())
-                
-                conn.close()
-                
-                # Find new claims
-                new_claims = all_claims_in_snowflake - existing_claims
-                
-                if len(new_claims) == 0:
-                    print("No new claims to sync")
-                    return True
-                
-                print(f"Found {len(new_claims)} new claims to fetch")
-                
-                # Fetch only new claims
-                raw_df = fetch_claims_from_snowflake(list(new_claims))
-                
-                if raw_df is None or raw_df.empty:
-                    print("No new data fetched")
-                    return True
-                
-                # Transform new data
-                new_claims_df = transform_snowflake_data_to_claims_format(raw_df)
-                
-                # Load existing data
-                existing_df = pd.read_csv(FULL_DATA_FILE, dtype={'Claim_Number': str})
-                
-                # Append new data
-                combined_df = pd.concat([existing_df, new_claims_df], ignore_index=True)
-                combined_df = combined_df.sort_values(['Claim_Number', 'First_TimeStamp'])
-                
-                # Save updated data
-                combined_df.to_csv(FULL_DATA_FILE, index=False)
-                print(f"Added {len(new_claims_df)} new records. Total: {len(combined_df)} records")
-                
-                # Update sync tracking
-                update_sync_tracking(len(combined_df['Claim_Number'].unique()), len(new_claims))
-                
-                return True
-                
-            except Exception as e:
-                print(f"Error during incremental sync: {e}")
-                if conn:
-                    conn.close()
-                return False
+        if not process_claims:
+            print("No claims found in process data files. Nothing to sync from Snowflake.")
+            return False
+        
+        print(f"Fetching Snowflake exposure data for {len(process_claims)} claims...")
+        
+        # Convert set to list for query
+        claim_list = list(process_claims)
+        
+        # Fetch data from Snowflake for these specific claims
+        raw_df = fetch_claims_from_snowflake(claim_numbers=claim_list)
+        
+        if raw_df is None or raw_df.empty:
+            print("No data fetched from Snowflake")
+            return False
+        
+        # Save exposure data directly (no transformation needed for exposure data)
+        # The dummy_snowflake_data.csv format is what we want to maintain
+        output_file = os.path.join(DATA_DIR, "dummy_snowflake_data.csv")
+        raw_df.to_csv(output_file, index=False)
+        print(f"Saved {len(raw_df)} exposure records to {output_file}")
+        print(f"Covers {raw_df['CLAIM_NBR'].nunique()} unique claims")
+        
+        # Update sync tracking
+        update_sync_tracking(len(process_claims))
+        
+        return True
     
     except Exception as e:
         print(f"Error during sync: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -271,21 +299,22 @@ def update_sync_tracking(total_claims, new_claims=0):
     Update sync tracking file with last sync information.
     
     Args:
-        total_claims (int): Total number of claims in the database
-        new_claims (int): Number of new claims added in this sync
+        total_claims (int): Total number of claims synced
+        new_claims (int): Number of new claims added (legacy parameter, not used)
     """
     sync_info = {
         'last_sync_timestamp': [datetime.now().strftime('%Y-%m-%d %H:%M:%S')],
         'total_claims': [total_claims],
-        'new_claims_added': [new_claims]
+        'claims_synced': [total_claims]
     }
     
     sync_df = pd.DataFrame(sync_info)
     sync_df.to_csv(SYNC_TRACKING_FILE, index=False)
-    print(f"Updated sync tracking: {total_claims} total claims, {new_claims} new")
+    print(f"Updated sync tracking: {total_claims} claims synced from Snowflake")
 
 
 def get_last_sync_info():
+
     """
     Get information about the last sync operation.
     
