@@ -936,6 +936,13 @@ window.ClaimView = (function () {
                     ${createDetailRow('Loss Type', info.loss_type)}
                     ${createDetailRow('Loss City', info.loss_city)}
                     ${createDetailRow('Loss State', info.loss_state)}
+                    ${createDetailRow('ZIP Code', info.loss_zip_code)}
+                    ${createDetailRow('County', info.loss_county)}
+                    ${createDetailRow('Cause Category', info.loss_cause_category)}
+                    ${createDetailRow('Cause Type', info.loss_cause_type)}
+                    ${createDetailRow('Category Type', info.loss_category_type)}
+                    ${createDetailRow('CAT Code', info.cat_code)}
+                    ${createDetailRow('Flag Description', info.flag_description)}
                     ${createDetailRow('Fault Rating', info.fault_rating)}
                     ${createDetailRow('CAT Indicator', info.cat_indicator)}
                 </div>
@@ -949,7 +956,15 @@ window.ClaimView = (function () {
                 <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); gap:12px;">
                     ${createDetailRow('Policy Number', info.policy_number)}
                     ${createDetailRow('Policy State', info.policy_state)}
+                    ${createDetailRow('Policy Status', info.policy_status)}
                     ${createDetailRow('Effective Date', info.policy_effective_date)}
+                    ${createDetailRow('Expiration Date', info.policy_expiration_date)}
+                    ${createDetailRow('Total Vehicles', info.policy_total_vehicles)}
+                    ${createDetailRow('Total Properties', info.policy_total_properties)}
+                    ${createDetailRow('New Policy', info.new_policy_indicator)}
+                    ${createDetailRow('Brand', info.brand)}
+                    ${createDetailRow('Product Line', info.product_line)}
+                    ${createDetailRow('Agent ID', info.agent_id)}
                 </div>
             </div>
         `);
@@ -971,10 +986,12 @@ window.ClaimView = (function () {
                         ${createDetailRow('Claimant Name', exp.claimant_name)}
                         ${createDetailRow('Loss Party Type', exp.loss_party_type)}
                         ${createDetailRow('Owner', exp.exposure_owner)}
+                        ${createDetailRow('Jurisdiction State', exp.jurisdiction_state)}
                         ${createDetailRow('Opened', exp.exposure_open_date.split('T')[0])}
                         ${createDetailRow('Closed', exp.exposure_closed_date !== 'N/A' ? exp.exposure_closed_date.split('T')[0] : 'N/A')}
                         ${createDetailRow('SUBRO Indicator', exp.subro_indicator)}
                         ${createDetailRow('SIU Indicator', exp.siu_indicator)}
+                        ${createDetailRow('Salvage Indicator', exp.salvage_indicator)}
                     </div>
                 </div>
             `).join('');
