@@ -14,6 +14,14 @@ try:
     SNOWFLAKE_ENABLED = True
 except ImportError as e:
     print(f"Snowflake sync not available: {e}")
+    print("Attempting to install snowflake-connector-python...")
+    try:
+        import subprocess
+        import sys
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "snowflake-connector-python"])
+        print("Successfully installed snowflake-connector-python. Please restart the application.")
+    except Exception as install_error:
+        print(f"Failed to install snowflake-connector-python: {install_error}")
     SNOWFLAKE_ENABLED = False
 
 # Initialize Flask server

@@ -82,7 +82,7 @@ def fetch_claims_from_snowflake(claim_numbers=None):
             
             sql_query = f"""
             SELECT *
-            FROM "PL_PROD"."PM_EDW_PRES_CL_D","LD_CLAIM_EXPOSURE_V" t1
+            FROM "PL_PROD"."PM_EDW_PRES_CL_D"."LD_CLAIM_EXPOSURE_V" t1
             LEFT JOIN (
                 SELECT *
                 FROM "PL_PROD"."PM_EDW_PRES_CL_D"."LD_CLAIM_V"
@@ -96,7 +96,7 @@ def fetch_claims_from_snowflake(claim_numbers=None):
             # Fetch all claims (initial load)
             sql_query = """
             SELECT *
-            FROM "PL_PROD"."PM_EDW_PRES_CL_D","LD_CLAIM_EXPOSURE_V" t1
+            FROM "PL_PROD"."PM_EDW_PRES_CL_D"."LD_CLAIM_EXPOSURE_V" t1
             LEFT JOIN (
                 SELECT *
                 FROM "PL_PROD"."PM_EDW_PRES_CL_D"."LD_CLAIM_V"
