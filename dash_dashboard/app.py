@@ -1090,16 +1090,31 @@ def get_claim_path(claim_number):
                 "claim_closed_date": str(first_row.get('CLAIM_CLSD_DT', 'N/A')),
                 "claim_segment": str(first_row.get('CLAIM_SEG_DESC', 'N/A')),
                 "claim_tier": str(first_row.get('CLAIM_TIER_DESC', 'N/A')),
+                "claim_owner": str(first_row.get('CLAIM_OWNR_EMPLY_NBR', 'N/A')),
                 "loss_date": str(first_row.get('LOSS_DT', 'N/A')),
                 "loss_type": str(first_row.get('LOSS_TYPE_DESC', 'N/A')),
                 "loss_city": str(first_row.get('LOSS_CITY_NME', 'N/A')),
                 "loss_state": str(first_row.get('LOSS_ST_DESC', 'N/A')),
+                "loss_zip_code": str(first_row.get('LOSS_ZIP_CD', 'N/A')),
+                "loss_county": str(first_row.get('LOSS_CNTY_NME', 'N/A')),
+                "loss_cause_category": str(first_row.get('LOSS_CAUS_CTGRY_DESC', 'N/A')),
+                "loss_cause_type": str(first_row.get('LOSS_CAUS_TYP_DESC', 'N/A')),
+                "loss_category_type": str(first_row.get('LOSS_CTGRY_TYP_DESC', 'N/A')),
                 "cat_indicator": str(first_row.get('CAT_IND', 'N/A')),
+                "cat_code": str(first_row.get('CAT_CD', 'N/A')),
+                "fault_rating": str(first_row.get('FAULT_RTG_DESC', 'N/A')),
+                "flag_description": str(first_row.get('FLAGD_DESC', 'N/A')),
                 "policy_number": str(first_row.get('POLICY_NBR', 'N/A')),
                 "policy_state": str(first_row.get('POLICY_ST_DESC', 'N/A')),
+                "policy_status": str(first_row.get('POLICY_STTS_DESC', 'N/A')),
                 "policy_effective_date": str(first_row.get('POLICY_EFCTV_DT', 'N/A')),
-                "fault_rating": str(first_row.get('FAULT_RTG_DESC', 'N/A')),
-                "claim_owner": str(first_row.get('CLAIM_OWNR_EMPLY_NBR', 'N/A'))
+                "policy_expiration_date": str(first_row.get('POLICY_XPRTN_DT', 'N/A')),
+                "policy_total_vehicles": str(first_row.get('POLICY_TOTAL_VEHICLES', 'N/A')),
+                "policy_total_properties": str(first_row.get('POLICY_TOTAL_PROPERTIES', 'N/A')),
+                "new_policy_indicator": str(first_row.get('NEW_POLICY_IND', 'N/A')),
+                "brand": str(first_row.get('BRAND_DESC', 'N/A')),
+                "product_line": str(first_row.get('PRDCT_LINE_DESC', 'N/A')),
+                "agent_id": str(first_row.get('AGNT_ID', 'N/A'))
             }
             
             # Get all exposures for this claim
@@ -1117,6 +1132,8 @@ def get_claim_path(claim_number):
                     "exposure_open_date": str(row.get('EXPSR_OPEN_DTM', 'N/A')),
                     "exposure_closed_date": str(row.get('EXPSR_CLSD_DTM', 'N/A')),
                     "loss_party_type": str(row.get('LOSS_PARTY_TYPE_DESC', 'N/A')),
+                    "jurisdiction_state": str(row.get('JURIS_ST_DESC', 'N/A')),
+                    "salvage_indicator": str(row.get('SALVAGE_IND', 'N/A')),
                     "subro_indicator": str(row.get('SUBRO_IND', 'N/A')),
                     "siu_indicator": str(row.get('SIU_IND', 'N/A'))
                 }

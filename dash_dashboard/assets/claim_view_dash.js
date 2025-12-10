@@ -751,15 +751,31 @@ window.ClaimView = (function () {
         const lossDetails = createInfoCard('Loss Information', [
             { label: 'Loss Date', value: info.loss_date },
             { label: 'Loss Type', value: info.loss_type },
-            { label: 'Location', value: `${info.loss_city}, ${info.loss_state}` },
+            { label: 'City', value: info.loss_city },
+            { label: 'State', value: info.loss_state },
+            { label: 'ZIP Code', value: info.loss_zip_code },
+            { label: 'County', value: info.loss_county },
+            { label: 'Cause Category', value: info.loss_cause_category },
+            { label: 'Cause Type', value: info.loss_cause_type },
+            { label: 'Category Type', value: info.loss_category_type },
             { label: 'Fault Rating', value: info.fault_rating },
-            { label: 'CAT Indicator', value: info.cat_indicator }
+            { label: 'CAT Indicator', value: info.cat_indicator },
+            { label: 'CAT Code', value: info.cat_code },
+            { label: 'Flag', value: info.flag_description }
         ]);
 
         const policyDetails = createInfoCard('Policy Information', [
             { label: 'Policy #', value: info.policy_number },
-            { label: 'Policy State', value: info.policy_state },
-            { label: 'Effective Date', value: info.policy_effective_date }
+            { label: 'Status', value: info.policy_status },
+            { label: 'State', value: info.policy_state },
+            { label: 'Effective Date', value: info.policy_effective_date },
+            { label: 'Expiration Date', value: info.policy_expiration_date },
+            { label: 'Total Vehicles', value: info.policy_total_vehicles },
+            { label: 'Total Properties', value: info.policy_total_properties },
+            { label: 'New Policy', value: info.new_policy_indicator },
+            { label: 'Brand', value: info.brand },
+            { label: 'Product Line', value: info.product_line },
+            { label: 'Agent ID', value: info.agent_id }
         ]);
 
         // Render exposures
@@ -780,8 +796,10 @@ window.ClaimView = (function () {
                         { label: 'Claimant', value: exp.claimant_name },
                         { label: 'Party Type', value: exp.loss_party_type },
                         { label: 'Owner', value: exp.exposure_owner },
+                        { label: 'Jurisdiction', value: exp.jurisdiction_state },
                         { label: 'Opened', value: exp.exposure_open_date.split('T')[0] },
                         { label: 'Closed', value: exp.exposure_closed_date !== 'N/A' ? exp.exposure_closed_date.split('T')[0] : 'N/A' },
+                        { label: 'Salvage', value: exp.salvage_indicator },
                         { label: 'SUBRO', value: exp.subro_indicator },
                         { label: 'SIU', value: exp.siu_indicator }
                     ].filter(item => item.value && item.value !== 'N/A' && item.value !== 'nan').map(item => `
