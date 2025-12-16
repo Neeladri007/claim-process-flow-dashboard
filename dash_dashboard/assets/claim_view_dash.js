@@ -201,14 +201,101 @@ window.ClaimView = (function () {
             return;
         }
 
-        // Create circular layout
+        // Create phase timeline visualization
+        const processColors = {};
+        const colorPalette = ['#f59e0b', '#ef4444', '#3b82f6', '#06b6d4', '#10b981', '#8b5cf6', '#ec4899', '#f97316'];
+        const processSequence = [];
+        let colorIndex = 0;
+
+        // Build sequential process list with durations
+        path.forEach(step => {
+            const proc = step.process || 'Unknown';
+            if (!processColors[proc]) {
+                processColors[proc] = colorPalette[colorIndex % colorPalette.length];
+                colorIndex++;
+            }
+            // Check if this is a new process segment
+            if (processSequence.length === 0 || processSequence[processSequence.length - 1].name !== proc) {
+                processSequence.push({ name: proc, color: processColors[proc], duration: step.active_minutes });
+            } else {
+                processSequence[processSequence.length - 1].duration += step.active_minutes;
+            }
+        });
+
+        const totalDuration = processSequence.reduce((sum, p) => sum + p.duration, 0);
+
+        // Get unique processes for legend
+        const uniqueProcesses = {};
+        processSequence.forEach(proc => {
+            if (!uniqueProcesses[proc.name]) {
+                uniqueProcesses[proc.name] = proc.color;
+            }
+        });
+
+        // Create phase timeline HTML with single line and legend
+        let timelineHtml = `
+            <div style="background:white; border-radius:12px; padding:20px; margin-bottom:20px; border:1px solid #e0e0e0; box-shadow:0 2px 8px rgba(0,0,0,0.1);">
+                <h3 style="color:#1A1446; margin:0 0 20px 0; font-size:1.2em; font-weight:700;">Phase Timeline</h3>
+                
+                <!-- Single line timeline with start arrow -->
+                <div style="display:flex; align-items:center; margin-bottom:20px;">
+                    <span style="font-size:1.5em; margin-right:10px; color:#1A1446;">▶</span>
+                    <div style="flex:1; display:flex; height:40px; border-radius:6px; overflow:hidden; box-shadow:0 2px 4px rgba(0,0,0,0.15);">
+                        ${processSequence.map((proc, index) => {
+            const widthPct = totalDuration > 0 ? (proc.duration / totalDuration * 100) : (100 / processSequence.length);
+            return `
+                                <div style="
+                                    width:${widthPct}%;
+                                    background:${proc.color};
+                                    display:flex;
+                                    align-items:center;
+                                    justify-content:center;
+                                    color:white;
+                                    font-size:0.75em;
+                                    font-weight:600;
+                                    position:relative;
+                                    border-right:${index < processSequence.length - 1 ? '1px solid rgba(255,255,255,0.3)' : 'none'};
+                                " title="${proc.name} - ${proc.duration.toFixed(1)}m (${widthPct.toFixed(1)}%)">
+                                    <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:0 4px;">${widthPct > 8 ? proc.name : ''}</span>
+                                </div>
+                            `;
+        }).join('')}
+                    </div>
+                </div>
+                
+                <!-- Legend -->
+                <div style="display:flex; flex-wrap:wrap; gap:12px; justify-content:center; padding-top:12px; border-top:1px solid #e0e0e0;">
+                    ${Object.entries(uniqueProcesses).map(([name, color]) => `
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            <div style="width:16px; height:16px; background:${color}; border-radius:3px; box-shadow:0 1px 3px rgba(0,0,0,0.2);"></div>
+                            <span style="font-size:0.85em; color:#666; font-weight:500;">${name}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+
+        // Set the phase timeline first
+        container.innerHTML = timelineHtml;
+
+        // Create circular layout for Phase Flow Diagram
         const width = container.offsetWidth || 600;
         const height = Math.max(500, width * 0.75); // Dynamic height based on width
         const radius = Math.min(width, height) / 2 - 80; // Increased padding (was 60)
 
-        container.innerHTML = '<h4 style="color:#666; margin-bottom:15px; font-size: 14px;">Phase Flow Diagram</h4>';
+        // Append Phase Flow Diagram header
+        const flowHeader = document.createElement('h4');
+        flowHeader.style.color = '#666';
+        flowHeader.style.marginBottom = '15px';
+        flowHeader.style.fontSize = '14px';
+        flowHeader.textContent = 'Phase Flow Diagram';
+        container.appendChild(flowHeader);
 
-        const svg = d3.select(container)
+        // Create SVG wrapper
+        const svgWrapper = document.createElement('div');
+        container.appendChild(svgWrapper);
+
+        const svg = d3.select(svgWrapper)
             .append('svg')
             .attr('width', '100%')
             .attr('height', height)
@@ -271,10 +358,11 @@ window.ClaimView = (function () {
         });
 
         // Calculate angles for each process
-        const angleStep = (2 * Math.PI) / processes.length;
+        const processKeys = Object.keys(processEntries);
+        const angleStep = (2 * Math.PI) / processKeys.length;
         const processPositions = {};
 
-        processes.forEach((proc, i) => {
+        processKeys.forEach((proc, i) => {
             const angle = i * angleStep - Math.PI / 2; // Start from top
             processPositions[proc] = {
                 angle: angle,
@@ -356,7 +444,7 @@ window.ClaimView = (function () {
 
         // Draw nodes
         const nodeGroups = g.selectAll('.process-node')
-            .data(processes)
+            .data(processKeys)
             .enter()
             .append('g')
             .attr('class', 'process-node')
@@ -466,8 +554,21 @@ window.ClaimView = (function () {
             }
         }
 
-        // Update summary stats
-        document.getElementById('totalSteps').textContent = data.total_steps;
+        // Update summary stats with deduplicated count
+        // Deduplicate consecutive identical entries for accurate step count
+        let deduplicatedCount = 0;
+        let lastStep = null;
+        data.path.forEach((step) => {
+            if (!lastStep ||
+                lastStep.timestamp !== step.timestamp ||
+                lastStep.process !== step.process ||
+                lastStep.activity !== step.activity) {
+                deduplicatedCount++;
+                lastStep = step;
+            }
+        });
+
+        document.getElementById('totalSteps').textContent = deduplicatedCount;
 
         const totalMinutes = data.path.reduce((sum, step) => sum + step.active_minutes, 0);
         document.getElementById('totalDuration').textContent = `${totalMinutes.toFixed(2)}m`;
@@ -623,11 +724,18 @@ window.ClaimView = (function () {
 
         // 1. Process Level Aggregation
         const processStats = {};
+        const processColors = {};
+        const colorPalette = ['#f59e0b', '#ef4444', '#3b82f6', '#06b6d4', '#10b981', '#8b5cf6', '#ec4899', '#f97316'];
+        let colorIndex = 0;
+
         data.path.forEach(step => {
-            if (!processStats[step.process]) {
-                processStats[step.process] = 0;
+            const proc = step.process || 'Unknown';
+            if (!processStats[proc]) {
+                processStats[proc] = 0;
+                processColors[proc] = colorPalette[colorIndex % colorPalette.length];
+                colorIndex++;
             }
-            processStats[step.process] += step.active_minutes;
+            processStats[proc] += step.active_minutes;
         });
 
         const sortedProcesses = Object.entries(processStats)
@@ -640,9 +748,8 @@ window.ClaimView = (function () {
 
         sortedProcesses.forEach(([proc, dur]) => {
             const pct = (dur / maxTotalProcessDuration) * 100;
-            const isInv = proc === 'Investigation';
-            const barColor = isInv ? '#6366f1' : '#FFD000';
-            const textColor = isInv ? '#6366f1' : '#1A1446';
+            const barColor = processColors[proc] || '#1A1446';
+            const textColor = processColors[proc] || '#1A1446';
 
             processHtml += `
                 <div style="display:flex; align-items:center; gap:10px; font-size:0.9em;">
@@ -707,13 +814,13 @@ window.ClaimView = (function () {
 
         // 3. Claim Information Section (if available)
         if (data.claim_info) {
-            renderClaimInfo(data.claim_info, data.exposures);
+            renderClaimInfo(data.claim_info, data.exposures, data.path);
         }
 
         if (resultsArea) resultsArea.style.display = 'block';
     }
 
-    function renderClaimInfo(info, exposures) {
+    function renderClaimInfo(info, exposures, path) {
         const claimInfoDiv = document.getElementById('claim-info-section');
         if (!claimInfoDiv) return;
 
@@ -742,7 +849,6 @@ window.ClaimView = (function () {
             { label: 'Status', value: info.claim_status },
             { label: 'Segment', value: info.claim_segment },
             { label: 'Tier', value: info.claim_tier },
-            { label: 'Owner', value: info.claim_owner },
             { label: 'Reported', value: info.claim_reported_date },
             { label: 'Opened', value: info.claim_open_date },
             { label: 'Closed', value: info.claim_closed_date }
@@ -793,9 +899,7 @@ window.ClaimView = (function () {
                         { label: 'Status', value: exp.exposure_status },
                         { label: 'Tier', value: exp.exposure_tier },
                         { label: 'Claimant Type', value: exp.claimant_type },
-                        { label: 'Claimant', value: exp.claimant_name },
                         { label: 'Party Type', value: exp.loss_party_type },
-                        { label: 'Owner', value: exp.exposure_owner },
                         { label: 'Jurisdiction', value: exp.jurisdiction_state },
                         { label: 'Opened', value: exp.exposure_open_date.split('T')[0] },
                         { label: 'Closed', value: exp.exposure_closed_date !== 'N/A' ? exp.exposure_closed_date.split('T')[0] : 'N/A' },
@@ -821,8 +925,8 @@ window.ClaimView = (function () {
                         <button onclick="window.ClaimView.viewFullClaimDetails()" style="background:#1A1446; color:#FFD000; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-size:0.85em; font-weight:600; display:flex; align-items:center; gap:6px;">
                             <span>📋</span> View Details
                         </button>
-                        <button onclick="window.ClaimView.downloadClaimPDF()" style="background:#FFD000; color:#1A1446; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-size:0.85em; font-weight:600; display:flex; align-items:center; gap:6px;">
-                            <span>📥</span> Download PDF
+                        <button onclick="window.ClaimView.downloadClaimCSV()" style="background:#FFD000; color:#1A1446; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-size:0.85em; font-weight:600; display:flex; align-items:center; gap:6px;">
+                            <span>📥</span> Download CSV
                         </button>
                     </div>
                 </div>
@@ -846,8 +950,8 @@ window.ClaimView = (function () {
             </div>
         `;
 
-        // Store the data for popup and PDF
-        window.currentClaimData = { info, exposures };
+        // Store the data for popup and CSV download
+        window.currentClaimData = { info, exposures, path };
     }
 
     function viewFullClaimDetails() {
@@ -983,9 +1087,7 @@ window.ClaimView = (function () {
                         ${createDetailRow('Status', exp.exposure_status)}
                         ${createDetailRow('Tier', exp.exposure_tier)}
                         ${createDetailRow('Claimant Type', exp.claimant_type)}
-                        ${createDetailRow('Claimant Name', exp.claimant_name)}
                         ${createDetailRow('Loss Party Type', exp.loss_party_type)}
-                        ${createDetailRow('Owner', exp.exposure_owner)}
                         ${createDetailRow('Jurisdiction State', exp.jurisdiction_state)}
                         ${createDetailRow('Opened', exp.exposure_open_date.split('T')[0])}
                         ${createDetailRow('Closed', exp.exposure_closed_date !== 'N/A' ? exp.exposure_closed_date.split('T')[0] : 'N/A')}
@@ -1019,49 +1121,67 @@ window.ClaimView = (function () {
         `;
     }
 
-    function downloadClaimPDF() {
+    function downloadClaimCSV() {
         const data = window.currentClaimData;
-        if (!data) return;
+        if (!data || !data.path) return;
 
         const claimNumber = data.info.claim_number;
-        const htmlContent = generateFullClaimHTML(data.info, data.exposures);
+        const path = data.path;
 
-        // Create a printable window
-        const printWindow = window.open('', '_blank');
-        printWindow.document.write(`
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Claim ${claimNumber}</title>
-                <style>
-                    body {
-                        font-family: Arial, sans-serif;
-                        padding: 20px;
-                        max-width: 1200px;
-                        margin: 0 auto;
-                    }
-                    h2 {
-                        color: #1A1446;
-                        border-bottom: 3px solid #FFD000;
-                        padding-bottom: 10px;
-                    }
-                    @media print {
-                        button { display: none; }
-                    }
-                </style>
-            </head>
-            <body>
-                <h2>Claim ${claimNumber} - Complete Details</h2>
-                ${htmlContent}
-                <div style="margin-top:20px; text-align:center;">
-                    <button onclick="window.print()" style="background:#1A1446; color:#FFD000; border:none; padding:12px 24px; border-radius:6px; cursor:pointer; font-size:1em; font-weight:600;">
-                        🖨️ Print / Save as PDF
-                    </button>
-                </div>
-            </body>
-            </html>
-        `);
-        printWindow.document.close();
+        // Deduplicate consecutive identical entries
+        const deduplicatedPath = [];
+        path.forEach((step, index) => {
+            // Check if this step is different from the previous one
+            if (index === 0 ||
+                deduplicatedPath[deduplicatedPath.length - 1].timestamp !== step.timestamp ||
+                deduplicatedPath[deduplicatedPath.length - 1].process !== step.process ||
+                deduplicatedPath[deduplicatedPath.length - 1].activity !== step.activity) {
+                deduplicatedPath.push({
+                    timestamp: step.timestamp,
+                    process: step.process,
+                    activity: step.activity,
+                    active_minutes: step.active_minutes,
+                    count: 1
+                });
+            } else {
+                // Same as previous, aggregate the duration
+                const last = deduplicatedPath[deduplicatedPath.length - 1];
+                last.active_minutes += step.active_minutes;
+                last.count += 1;
+            }
+        });
+
+        // Create CSV header
+        const headers = ['Step', 'Timestamp', 'Process', 'Activity', 'Duration (minutes)', 'Count'];
+
+        // Create CSV rows
+        const rows = deduplicatedPath.map((step, index) => [
+            index + 1,
+            step.timestamp,
+            step.process || '',
+            step.activity || '',
+            step.active_minutes.toFixed(2),
+            step.count
+        ]);
+
+        // Combine headers and rows
+        const csvContent = [
+            headers.join(','),
+            ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+        ].join('\n');
+
+        // Create blob and download
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+
+        link.setAttribute('href', url);
+        link.setAttribute('download', `claim_${claimNumber}_steps.csv`);
+        link.style.visibility = 'hidden';
+
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     }
 
     function addProgressBarTooltips() {
@@ -1131,7 +1251,7 @@ window.ClaimView = (function () {
     return {
         init: init,
         viewFullClaimDetails: viewFullClaimDetails,
-        downloadClaimPDF: downloadClaimPDF
+        downloadClaimCSV: downloadClaimCSV
     };
 
 })();

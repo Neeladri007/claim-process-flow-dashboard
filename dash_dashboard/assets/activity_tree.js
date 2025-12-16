@@ -10,11 +10,19 @@ window.ActivityFlow = (function () {
     let selectedNodeId = null;
     let initialStatsData = null;
     let sortState = { column: null, direction: 'asc' };
+    let filteredClaims = null; // Store filtered claims
 
-    // Fetch API wrapper
+    // Fetch API wrapper with filtered claims support
     async function fetchAPI(endpoint) {
         try {
-            const response = await fetch(`${API_BASE}${endpoint}`);
+            // Add filtered claims to endpoint if available
+            let url = `${API_BASE}${endpoint}`;
+            if (filteredClaims && filteredClaims.length > 0) {
+                const separator = endpoint.includes('?') ? '&' : '?';
+                url += `${separator}filtered_claims=${encodeURIComponent(JSON.stringify(filteredClaims))}`;
+            }
+
+            const response = await fetch(url);
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
@@ -23,6 +31,12 @@ window.ActivityFlow = (function () {
             console.error('API Error:', error);
             throw error;
         }
+    }
+
+    // Set filtered claims
+    function setFilteredClaims(claims) {
+        filteredClaims = claims;
+        console.log('Activity Flow - Filtered claims set:', claims ? claims.length : 'all');
     }
 
     // Helper function to group children by process (Modified to NOT group, just sort)
@@ -62,6 +76,23 @@ window.ActivityFlow = (function () {
         try {
             const data = await fetchAPI('/activity-flow/starting-nodes');
             initialStatsData = data.total_claims; // Store for restoration
+
+            // Check if no claims are returned (filtered to 0)
+            if (data.total_claims === 0 || !data.starting_nodes || data.starting_nodes.length === 0) {
+                // Hide the tree and show a message
+                const container = document.getElementById('activity-tree');
+                if (container) {
+                    container.innerHTML = `
+                        <div style="text-align:center; padding:60px 20px; color:#666;">
+                            <div style="font-size:48px; margin-bottom:20px;">🔍</div>
+                            <div style="font-size:18px; font-weight:600; margin-bottom:10px; color:#1A1446;">No Claims Found</div>
+                            <div style="font-size:14px;">The selected filters returned no matching claims. Please adjust your filter criteria.</div>
+                        </div>
+                    `;
+                }
+                hideLoading();
+                return;
+            }
 
             // Group starting nodes
             const groupedNodes = groupChildrenByProcess(data.starting_nodes);
@@ -1041,6 +1072,7 @@ window.ActivityFlow = (function () {
 
     return {
         init: loadAllStartingProcesses,
+        setFilteredClaims: setFilteredClaims,
         openClaimsModal: openClaimsModal,
         closeModal: closeModal,
         viewClaim: viewClaim,

@@ -14,15 +14,13 @@ try:
     SNOWFLAKE_ENABLED = True
 except ImportError as e:
     print(f"Snowflake sync not available: {e}")
-    print("Attempting to install snowflake-connector-python...")
-    try:
-        import subprocess
-        import sys
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "snowflake-connector-python"])
-        print("Successfully installed snowflake-connector-python. Please restart the application.")
-    except Exception as install_error:
-        print(f"Failed to install snowflake-connector-python: {install_error}")
+    print("Continuing without Snowflake sync functionality...")
     SNOWFLAKE_ENABLED = False
+    # Define dummy functions
+    def sync_claims_data():
+        return False
+    def get_last_sync_info():
+        return None
 
 # Initialize Flask server
 server = Flask(__name__)
@@ -1241,10 +1239,11 @@ def initialize_data_selector(_):
 
 @app.callback(
     Output('selected-studies-display', 'children'),
-    [Input('data-file-selector', 'value')]
+    [Input('data-file-selector', 'value'),
+     Input('data-change-trigger', 'data')]
 )
-def update_selected_studies_display(selected_files):
-    """Display which studies are selected"""
+def update_selected_studies_display(selected_files, trigger):
+    """Display which studies are selected with combined claim count"""
     if not selected_files:
         return ""
     
@@ -1266,20 +1265,38 @@ def update_selected_studies_display(selected_files):
         else:
             return name
     
+    # Get current data summary if available
+    summary_text = ""
+    if data_summary:
+        total_claims = data_summary.get('total_claims', 0)
+        min_date = data_summary.get('min_timestamp', '')
+        max_date = data_summary.get('max_timestamp', '')
+        
+        if total_claims > 0:
+            summary_text = f" • {total_claims} Claims"
+            if min_date and max_date:
+                try:
+                    from datetime import datetime
+                    min_dt = datetime.strptime(min_date, '%Y-%m-%d')
+                    max_dt = datetime.strptime(max_date, '%Y-%m-%d')
+                    summary_text += f" • {min_dt.strftime('%b %d, %Y')} to {max_dt.strftime('%b %d, %Y')}"
+                except:
+                    pass
+    
     if isinstance(selected_files, list):
         if len(selected_files) == 0:
             return ""
         elif len(selected_files) == 1:
             study_name = format_study_name(selected_files[0])
-            return f"Selected Study: {study_name}"
+            return f"Selected Study: {study_name}{summary_text}"
         else:
             # Multiple studies
             study_names = [format_study_name(f) for f in selected_files]
-            return f"Selected Studies: {', '.join(study_names)}"
+            return f"Selected Studies: {', '.join(study_names)}{summary_text}"
     else:
         # Single file selected (string)
         study_name = format_study_name(selected_files)
-        return f"Selected Study: {study_name}"
+        return f"Selected Study: {study_name}{summary_text}"
 
 @app.callback(
     Output('data-change-trigger', 'data'),
@@ -1304,25 +1321,29 @@ def load_selected_data(filename, current_trigger):
 @app.callback(
     [Output('filter-loss-state', 'options'),
      Output('filter-loss-city', 'options'),
-     Output('filter-claim-owner', 'options'),
      Output('filter-claim-seg', 'options'),
      Output('filter-claim-tier', 'options'),
      Output('filter-cat-ind', 'options'),
-     Output('filter-policy-state', 'options')],
+     Output('filter-policy-state', 'options'),
+     Output('filter-loss-state', 'value', allow_duplicate=True),
+     Output('filter-loss-city', 'value', allow_duplicate=True),
+     Output('filter-claim-seg', 'value', allow_duplicate=True),
+     Output('filter-claim-tier', 'value', allow_duplicate=True),
+     Output('filter-cat-ind', 'value', allow_duplicate=True),
+     Output('filter-policy-state', 'value', allow_duplicate=True)],
     [Input('tabs', 'value'),
      Input('filter-loss-state', 'value'),
      Input('filter-loss-city', 'value'),
-     Input('filter-claim-owner', 'value'),
      Input('filter-claim-seg', 'value'),
      Input('filter-claim-tier', 'value'),
      Input('filter-cat-ind', 'value'),
      Input('filter-policy-state', 'value')],
-    prevent_initial_call=False
+    prevent_initial_call='initial_duplicate'
 )
-def populate_filters(tab, loss_state, loss_city, claim_owner, claim_seg, claim_tier, cat_ind, policy_state):
+def populate_filters(tab, loss_state, loss_city, claim_seg, claim_tier, cat_ind, policy_state):
     """Populate filter dropdowns with cascading options based on selections."""
     if tab != 'process-flow' or exposure_df is None:
-        return [], [], [], [], [], [], []
+        return [], [], [], [], [], [], None, None, None, None, None, None
     
     try:
         # Apply filters to get the current filtered dataset
@@ -1334,8 +1355,6 @@ def populate_filters(tab, loss_state, loss_city, claim_owner, claim_seg, claim_t
             temp_df = temp_df[temp_df['LOSS_ST_DESC'].isin(loss_state)]
         if loss_city:
             temp_df = temp_df[temp_df['LOSS_CITY_NME'].isin(loss_city)]
-        if claim_owner:
-            temp_df = temp_df[temp_df['CLAIM_OWNR_EMPLY_NBR'].isin(claim_owner)]
         if claim_seg:
             temp_df = temp_df[temp_df['CLAIM_SEG_DESC'].isin(claim_seg)]
         if claim_tier:
@@ -1350,8 +1369,6 @@ def populate_filters(tab, loss_state, loss_city, claim_owner, claim_seg, claim_t
         temp_state['CLAIM_OWNR_EMPLY_NBR'] = temp_state['CLAIM_OWNR_EMPLY_NBR'].astype(str)
         if loss_city:
             temp_state = temp_state[temp_state['LOSS_CITY_NME'].isin(loss_city)]
-        if claim_owner:
-            temp_state = temp_state[temp_state['CLAIM_OWNR_EMPLY_NBR'].isin(claim_owner)]
         if claim_seg:
             temp_state = temp_state[temp_state['CLAIM_SEG_DESC'].isin(claim_seg)]
         if claim_tier:
@@ -1360,15 +1377,13 @@ def populate_filters(tab, loss_state, loss_city, claim_owner, claim_seg, claim_t
             temp_state = temp_state[temp_state['CAT_IND'].isin(cat_ind)]
         if policy_state:
             temp_state = temp_state[temp_state['POLICY_ST_CD'].isin(policy_state)]
-        loss_state_options = [{'label': x, 'value': x} for x in sorted(temp_state['LOSS_ST_DESC'].dropna().unique())]
+        loss_state_options = [{'label': x, 'value': x} for x in sorted(temp_state['LOSS_ST_DESC'].dropna().unique()) if x and str(x).strip() not in ['--', 'nan', '']]
         
         # Loss City options - get from temp_df excluding current city filter
         temp_city = exposure_df.copy()
         temp_city['CLAIM_OWNR_EMPLY_NBR'] = temp_city['CLAIM_OWNR_EMPLY_NBR'].astype(str)
         if loss_state:
             temp_city = temp_city[temp_city['LOSS_ST_DESC'].isin(loss_state)]
-        if claim_owner:
-            temp_city = temp_city[temp_city['CLAIM_OWNR_EMPLY_NBR'].isin(claim_owner)]
         if claim_seg:
             temp_city = temp_city[temp_city['CLAIM_SEG_DESC'].isin(claim_seg)]
         if claim_tier:
@@ -1377,24 +1392,16 @@ def populate_filters(tab, loss_state, loss_city, claim_owner, claim_seg, claim_t
             temp_city = temp_city[temp_city['CAT_IND'].isin(cat_ind)]
         if policy_state:
             temp_city = temp_city[temp_city['POLICY_ST_CD'].isin(policy_state)]
-        loss_city_options = [{'label': x, 'value': x} for x in sorted(temp_city['LOSS_CITY_NME'].dropna().unique())]
-        
-        # Claim Owner options - get from temp_df excluding current owner filter
-        temp_owner = exposure_df.copy()
-        temp_owner['CLAIM_OWNR_EMPLY_NBR'] = temp_owner['CLAIM_OWNR_EMPLY_NBR'].astype(str)
-        if loss_state:
-            temp_owner = temp_owner[temp_owner['LOSS_ST_DESC'].isin(loss_state)]
-        if loss_city:
-            temp_owner = temp_owner[temp_owner['LOSS_CITY_NME'].isin(loss_city)]
-        if claim_seg:
-            temp_owner = temp_owner[temp_owner['CLAIM_SEG_DESC'].isin(claim_seg)]
-        if claim_tier:
-            temp_owner = temp_owner[temp_owner['CLAIM_TIER_DESC'].isin(claim_tier)]
-        if cat_ind:
-            temp_owner = temp_owner[temp_owner['CAT_IND'].isin(cat_ind)]
-        if policy_state:
-            temp_owner = temp_owner[temp_owner['POLICY_ST_CD'].isin(policy_state)]
-        claim_owner_options = [{'label': x, 'value': x} for x in sorted(temp_owner['CLAIM_OWNR_EMPLY_NBR'].dropna().astype(str).unique())]
+        # Standardize city names to title case and filter out invalid values
+        cities = temp_city['LOSS_CITY_NME'].dropna().unique()
+        standardized_cities = {}
+        for city in cities:
+            city_str = str(city).strip()
+            if city_str and city_str not in ['--', 'nan', '']:
+                # Standardize to title case
+                standardized = city_str.title()
+                standardized_cities[standardized] = city  # Map standardized to original for filtering
+        loss_city_options = [{'label': x, 'value': standardized_cities[x]} for x in sorted(standardized_cities.keys())]
         
         # Claim Segment options - get from temp_df excluding current segment filter
         temp_seg = exposure_df.copy()
@@ -1403,15 +1410,13 @@ def populate_filters(tab, loss_state, loss_city, claim_owner, claim_seg, claim_t
             temp_seg = temp_seg[temp_seg['LOSS_ST_DESC'].isin(loss_state)]
         if loss_city:
             temp_seg = temp_seg[temp_seg['LOSS_CITY_NME'].isin(loss_city)]
-        if claim_owner:
-            temp_seg = temp_seg[temp_seg['CLAIM_OWNR_EMPLY_NBR'].isin(claim_owner)]
         if claim_tier:
             temp_seg = temp_seg[temp_seg['CLAIM_TIER_DESC'].isin(claim_tier)]
         if cat_ind:
             temp_seg = temp_seg[temp_seg['CAT_IND'].isin(cat_ind)]
         if policy_state:
             temp_seg = temp_seg[temp_seg['POLICY_ST_CD'].isin(policy_state)]
-        claim_seg_options = [{'label': x, 'value': x} for x in sorted(temp_seg['CLAIM_SEG_DESC'].dropna().unique())]
+        claim_seg_options = [{'label': x, 'value': x} for x in sorted(temp_seg['CLAIM_SEG_DESC'].dropna().unique()) if x and str(x).strip() not in ['--', 'nan', '']]
         
         # Claim Tier options - get from temp_df excluding current tier filter
         temp_tier = exposure_df.copy()
@@ -1420,15 +1425,13 @@ def populate_filters(tab, loss_state, loss_city, claim_owner, claim_seg, claim_t
             temp_tier = temp_tier[temp_tier['LOSS_ST_DESC'].isin(loss_state)]
         if loss_city:
             temp_tier = temp_tier[temp_tier['LOSS_CITY_NME'].isin(loss_city)]
-        if claim_owner:
-            temp_tier = temp_tier[temp_tier['CLAIM_OWNR_EMPLY_NBR'].isin(claim_owner)]
         if claim_seg:
             temp_tier = temp_tier[temp_tier['CLAIM_SEG_DESC'].isin(claim_seg)]
         if cat_ind:
             temp_tier = temp_tier[temp_tier['CAT_IND'].isin(cat_ind)]
         if policy_state:
             temp_tier = temp_tier[temp_tier['POLICY_ST_CD'].isin(policy_state)]
-        claim_tier_options = [{'label': x, 'value': x} for x in sorted(temp_tier['CLAIM_TIER_DESC'].dropna().unique())]
+        claim_tier_options = [{'label': x, 'value': x} for x in sorted(temp_tier['CLAIM_TIER_DESC'].dropna().unique()) if x and str(x).strip() not in ['--', 'nan', '']]
         
         # CAT Indicator options - get from temp_df excluding current cat filter
         temp_cat = exposure_df.copy()
@@ -1437,15 +1440,13 @@ def populate_filters(tab, loss_state, loss_city, claim_owner, claim_seg, claim_t
             temp_cat = temp_cat[temp_cat['LOSS_ST_DESC'].isin(loss_state)]
         if loss_city:
             temp_cat = temp_cat[temp_cat['LOSS_CITY_NME'].isin(loss_city)]
-        if claim_owner:
-            temp_cat = temp_cat[temp_cat['CLAIM_OWNR_EMPLY_NBR'].isin(claim_owner)]
         if claim_seg:
             temp_cat = temp_cat[temp_cat['CLAIM_SEG_DESC'].isin(claim_seg)]
         if claim_tier:
             temp_cat = temp_cat[temp_cat['CLAIM_TIER_DESC'].isin(claim_tier)]
         if policy_state:
             temp_cat = temp_cat[temp_cat['POLICY_ST_CD'].isin(policy_state)]
-        cat_ind_options = [{'label': x, 'value': x} for x in sorted(temp_cat['CAT_IND'].dropna().unique())]
+        cat_ind_options = [{'label': x, 'value': x} for x in sorted(temp_cat['CAT_IND'].dropna().unique()) if x and str(x).strip() not in ['--', 'nan', '']]
         
         # Policy State options - get from temp_df excluding current policy state filter
         temp_policy = exposure_df.copy()
@@ -1454,34 +1455,64 @@ def populate_filters(tab, loss_state, loss_city, claim_owner, claim_seg, claim_t
             temp_policy = temp_policy[temp_policy['LOSS_ST_DESC'].isin(loss_state)]
         if loss_city:
             temp_policy = temp_policy[temp_policy['LOSS_CITY_NME'].isin(loss_city)]
-        if claim_owner:
-            temp_policy = temp_policy[temp_policy['CLAIM_OWNR_EMPLY_NBR'].isin(claim_owner)]
         if claim_seg:
             temp_policy = temp_policy[temp_policy['CLAIM_SEG_DESC'].isin(claim_seg)]
         if claim_tier:
             temp_policy = temp_policy[temp_policy['CLAIM_TIER_DESC'].isin(claim_tier)]
         if cat_ind:
             temp_policy = temp_policy[temp_policy['CAT_IND'].isin(cat_ind)]
-        policy_state_options = [{'label': x, 'value': x} for x in sorted(temp_policy['POLICY_ST_CD'].dropna().unique())]
+        policy_state_options = [{'label': x, 'value': x} for x in sorted(temp_policy['POLICY_ST_CD'].dropna().unique()) if x and str(x).strip() not in ['--', 'nan', '']]
         
-        return loss_state_options, loss_city_options, claim_owner_options, claim_seg_options, claim_tier_options, cat_ind_options, policy_state_options
+        # Clean up incompatible selections
+        # Get available values for each filter
+        available_loss_states = {opt['value'] for opt in loss_state_options}
+        available_loss_cities = {opt['value'] for opt in loss_city_options}
+        available_claim_segs = {opt['value'] for opt in claim_seg_options}
+        available_claim_tiers = {opt['value'] for opt in claim_tier_options}
+        available_cat_inds = {opt['value'] for opt in cat_ind_options}
+        available_policy_states = {opt['value'] for opt in policy_state_options}
+        
+        # Clean current selections to only include available options
+        clean_loss_state = [x for x in (loss_state or []) if x in available_loss_states] if loss_state else loss_state
+        clean_loss_city = [x for x in (loss_city or []) if x in available_loss_cities] if loss_city else loss_city
+        clean_claim_seg = [x for x in (claim_seg or []) if x in available_claim_segs] if claim_seg else claim_seg
+        clean_claim_tier = [x for x in (claim_tier or []) if x in available_claim_tiers] if claim_tier else claim_tier
+        clean_cat_ind = [x for x in (cat_ind or []) if x in available_cat_inds] if cat_ind else cat_ind
+        clean_policy_state = [x for x in (policy_state or []) if x in available_policy_states] if policy_state else policy_state
+        
+        # If a filter has selections but none are available after cleaning, clear it
+        if loss_state and not clean_loss_state:
+            clean_loss_state = None
+        if loss_city and not clean_loss_city:
+            clean_loss_city = None
+        if claim_seg and not clean_claim_seg:
+            clean_claim_seg = None
+        if claim_tier and not clean_claim_tier:
+            clean_claim_tier = None
+        if cat_ind and not clean_cat_ind:
+            clean_cat_ind = None
+        if policy_state and not clean_policy_state:
+            clean_policy_state = None
+        
+        return (loss_state_options, loss_city_options, claim_seg_options, claim_tier_options, cat_ind_options, policy_state_options,
+                clean_loss_state, clean_loss_city, clean_claim_seg, clean_claim_tier, clean_cat_ind, clean_policy_state)
     except Exception as e:
         print(f"Error populating filters: {e}")
-        return [], [], [], [], [], [], []
+        return [], [], [], [], [], [], None, None, None, None, None, None
 
 @app.callback(
     [Output('filtered-claims-store', 'data'),
      Output('filter-status', 'children')],
     [Input('filter-loss-state', 'value'),
      Input('filter-loss-city', 'value'),
-     Input('filter-claim-owner', 'value'),
      Input('filter-claim-seg', 'value'),
      Input('filter-claim-tier', 'value'),
      Input('filter-cat-ind', 'value'),
-     Input('filter-policy-state', 'value')],
+     Input('filter-policy-state', 'value'),
+     Input('data-change-trigger', 'data')],
     prevent_initial_call=False
 )
-def apply_filters(loss_state, loss_city, claim_owner, claim_seg, claim_tier, cat_ind, policy_state):
+def apply_filters(loss_state, loss_city, claim_seg, claim_tier, cat_ind, policy_state, trigger):
     """Apply filters automatically when selections change."""
     if exposure_df is None:
         return None, "⚠ Exposure data not available"
@@ -1503,8 +1534,6 @@ def apply_filters(loss_state, loss_city, claim_owner, claim_seg, claim_tier, cat
             filtered_df = filtered_df[filtered_df['LOSS_ST_DESC'].isin(loss_state)]
         if loss_city:
             filtered_df = filtered_df[filtered_df['LOSS_CITY_NME'].isin(loss_city)]
-        if claim_owner:
-            filtered_df = filtered_df[filtered_df['CLAIM_OWNR_EMPLY_NBR'].isin(claim_owner)]
         if claim_seg:
             filtered_df = filtered_df[filtered_df['CLAIM_SEG_DESC'].isin(claim_seg)]
         if claim_tier:
@@ -1524,7 +1553,7 @@ def apply_filters(loss_state, loss_city, claim_owner, claim_seg, claim_tier, cat
             total_claims = exposure_df['CLAIM_NBR'].nunique()
         filtered_count = len(claim_numbers)
         
-        if not any([loss_state, loss_city, claim_owner, claim_seg, claim_tier, cat_ind, policy_state]):
+        if not any([loss_state, loss_city, claim_seg, claim_tier, cat_ind, policy_state]):
             status = f"Showing all {total_claims} claims"
         else:
             status = f"✓ Filtered to {filtered_count} of {total_claims} claims"
@@ -1537,20 +1566,18 @@ def apply_filters(loss_state, loss_city, claim_owner, claim_seg, claim_tier, cat
     Output('selected-filters-display', 'children'),
     [Input('filter-loss-state', 'value'),
      Input('filter-loss-city', 'value'),
-     Input('filter-claim-owner', 'value'),
      Input('filter-claim-seg', 'value'),
      Input('filter-claim-tier', 'value'),
      Input('filter-cat-ind', 'value'),
      Input('filter-policy-state', 'value')]
 )
-def display_selected_filters(loss_state, loss_city, claim_owner, claim_seg, claim_tier, cat_ind, policy_state):
+def display_selected_filters(loss_state, loss_city, claim_seg, claim_tier, cat_ind, policy_state):
     """Display selected filters as badges."""
     badges = []
     
     filter_data = [
         ('Loss State', loss_state),
         ('Loss City', loss_city),
-        ('Claim Owner', claim_owner),
         ('Claim Segment', claim_seg),
         ('Claim Tier', claim_tier),
         ('CAT Indicator', cat_ind),
@@ -1605,7 +1632,6 @@ def display_selected_filters(loss_state, loss_city, claim_owner, claim_seg, clai
 @app.callback(
     [Output('filter-loss-state', 'value'),
      Output('filter-loss-city', 'value'),
-     Output('filter-claim-owner', 'value'),
      Output('filter-claim-seg', 'value'),
      Output('filter-claim-tier', 'value'),
      Output('filter-cat-ind', 'value'),
@@ -1615,7 +1641,7 @@ def display_selected_filters(loss_state, loss_city, claim_owner, claim_seg, clai
 )
 def clear_filters(n_clicks):
     """Clear all filter selections."""
-    return None, None, None, None, None, None, None
+    return None, None, None, None, None, None
 
 @app.callback(Output('tabs-content', 'children'), Input('tabs', 'value'))
 def render_content(tab):
@@ -1666,7 +1692,7 @@ def render_content(tab):
                         id='filter-loss-state', 
                         multi=True, 
                         placeholder='Loss State', 
-                        style={'width': '160px', 'marginRight': '6px', 'fontSize': '15px'},
+                        style={'width': '160px', 'marginRight': '6px', 'fontSize': '11px'},
                         optionHeight=30
                     ),
                     dcc.Dropdown(
@@ -1674,13 +1700,6 @@ def render_content(tab):
                         multi=True, 
                         placeholder='Loss City', 
                         style={'width': '160px', 'marginRight': '6px', 'fontSize': '11px'},
-                        optionHeight=30
-                    ),
-                    dcc.Dropdown(
-                        id='filter-claim-owner', 
-                        multi=True, 
-                        placeholder='Claim Owner', 
-                        style={'width': '140px', 'marginRight': '6px', 'fontSize': '11px'},
                         optionHeight=30
                     ),
                     dcc.Dropdown(
@@ -1799,7 +1818,7 @@ clientside_callback(
     """
     function(filteredClaims, tab) {
         if (tab === 'process-flow' && window.ProcessFlow) {
-            console.log('Applying filter with', filteredClaims ? filteredClaims.length : 'all', 'claims');
+            console.log('Applying filter to Process Flow with', filteredClaims ? filteredClaims.length : 'all', 'claims');
             setTimeout(function() {
                 if (filteredClaims) {
                     window.ProcessFlow.setFilteredClaims(filteredClaims);
@@ -1807,6 +1826,17 @@ clientside_callback(
                     window.ProcessFlow.setFilteredClaims(null);
                 }
                 window.ProcessFlow.init(true);
+            }, 100);
+        }
+        if (tab === 'activity-flow' && window.ActivityFlow) {
+            console.log('Applying filter to Activity Flow with', filteredClaims ? filteredClaims.length : 'all', 'claims');
+            setTimeout(function() {
+                if (filteredClaims) {
+                    window.ActivityFlow.setFilteredClaims(filteredClaims);
+                } else {
+                    window.ActivityFlow.setFilteredClaims(null);
+                }
+                window.ActivityFlow.init(true);
             }, 100);
         }
         return window.dash_clientside.no_update;

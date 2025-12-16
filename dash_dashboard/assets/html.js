@@ -66,6 +66,23 @@ window.ProcessFlow = (function () {
             // Calculate total claims
             const totalClaims = data.total_claims || allStartingProcesses.reduce((sum, sp) => sum + sp.count, 0);
 
+            // Check if no claims are returned (filtered to 0)
+            if (totalClaims === 0 || allStartingProcesses.length === 0) {
+                // Hide the tree and show a message
+                const container = document.getElementById('process-tree');
+                if (container) {
+                    container.innerHTML = `
+                        <div style="text-align:center; padding:60px 20px; color:#666;">
+                            <div style="font-size:48px; margin-bottom:20px;">🔍</div>
+                            <div style="font-size:18px; font-weight:600; margin-bottom:10px; color:#1A1446;">No Claims Found</div>
+                            <div style="font-size:14px;">The selected filters returned no matching claims. Please adjust your filter criteria.</div>
+                        </div>
+                    `;
+                }
+                hideLoading();
+                return;
+            }
+
             // Create starting processes as children
             const startingNodes = allStartingProcesses.map(sp => ({
                 id: 'node_' + sp.process,  // Unique ID for starting nodes
