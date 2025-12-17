@@ -211,6 +211,14 @@ def load_exposure_data():
             exposure_df['CLAIM_NBR'] = exposure_df['CLAIM_NBR'].apply(
                 lambda x: str(x) if str(x).startswith('0') else '0' + str(x)
             )
+            
+            # Clean up state and city values
+            if 'LOSS_ST_DESC' in exposure_df.columns:
+                exposure_df['LOSS_ST_DESC'] = exposure_df['LOSS_ST_DESC'].replace('~', 'Unknown')
+            if 'POLICY_ST_DESC' in exposure_df.columns:
+                exposure_df['POLICY_ST_DESC'] = exposure_df['POLICY_ST_DESC'].replace('~', 'Unknown')
+            if 'LOSS_CITY_NME' in exposure_df.columns:
+                exposure_df['LOSS_CITY_NME'] = exposure_df['LOSS_CITY_NME'].replace('Unk', 'Unknown')
             print(f"Loaded {len(exposure_df)} exposure records for {exposure_df['CLAIM_NBR'].nunique()} claims")
             return True
         except Exception as e:
